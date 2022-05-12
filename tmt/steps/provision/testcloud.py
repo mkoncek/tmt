@@ -479,10 +479,15 @@ class GuestTestcloud(tmt.Guest):
                 f"Failed to prepare the image. Check the '{TESTCLOUD_IMAGES}' "
                 f"directory permissions.", original=error)
 
+        # Prepare hostname (get rid of possible non-ascii characters)
+        hostname = re.sub("[^a-z]+", "-", self.name.lower())
+        hostname = re.sub("^[^a-z]*", "", hostname)
+        hostname = re.sub("[^a-z]*$", "", hostname)
+
         # Create instance
         self.instance_name = self._tmt_name()
         self.instance = testcloud.instance.Instance(
-            name=self.instance_name, image=self.image,
+            name=self.instance_name, image=self.image, hostname=hostname,
             connection=f"qemu:///{self.connection}", desired_arch=self.arch)
         self.verbose('name', self.instance_name, 'green')
 
