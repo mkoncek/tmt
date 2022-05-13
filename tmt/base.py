@@ -188,7 +188,7 @@ def _format_type(type_) -> str:
         return 'Fmf id'
 
     if isinstance(type_, ForwardRef):
-        return _format_type(type_._evaluate(globals(), locals()))
+        return _format_type(type_._evaluate(globals(), locals(), frozenset()))
 
     raise NotImplementedError(
         f'type {type_} has no human-readable description')
@@ -413,7 +413,7 @@ def _check_type(
             address,
             shift + 1,
             value,
-            expected_type._evaluate(globals(), locals()),
+            expected_type._evaluate(globals(), locals(), frozenset()),
             errors
             )
 
