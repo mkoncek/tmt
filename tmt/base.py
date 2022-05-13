@@ -3,13 +3,15 @@
 
 import copy
 import functools
+import inspect
 import os
 import re
 import shutil
 import subprocess
 import sys
 import time
-from typing import Optional
+from typing import (Any, Dict, ForwardRef, Generator, List, Optional, Tuple,
+                    Type, Union)
 
 import click
 import fmf
@@ -18,9 +20,9 @@ from fmf.utils import listed
 from ruamel.yaml.error import MarkedYAMLError
 
 if sys.version_info >= (3, 8):
-    from typing import TypedDict
+    from typing import Literal, TypedDict
 else:
-    from typing_extensions import TypedDict
+    from typing_extensions import TypedDict, Literal
 
 import tmt.export
 import tmt.steps
@@ -64,6 +66,15 @@ SECTIONS_HEADINGS = {
     }
 
 
+LINK_RELATIONS = ['verifies', 'verified-by',
+                  'implements', 'implemented-by',
+                  'documents', 'documented-by',
+                  'blocks', 'blocked-by',
+                  'duplicates', 'duplicated-by',
+                  'parent', 'child',
+                  'relates']
+
+
 # See https://fmf.readthedocs.io/en/latest/concept.html#identifiers for
 # formal specification.
 class FmfIdType(TypedDict):
@@ -73,7 +84,579 @@ class FmfIdType(TypedDict):
     name: Optional[str]
 
 
-class Core(tmt.utils.Common):
+# A type describing core `link` attribute. See https://tmt.readthedocs.io/en/stable/spec/core.html#link
+# for its formal specification, the gist is: there can be several
+# combinations of various data structures.
+
+# TODO: `*LINK_RELATIONS` would be much better, DRY, but that's allowed
+# since Python 3.11.
+_RawLinkRelationType = Literal[
+    'verifies', 'verified-by',
+    'implements', 'implemented-by',
+    'documents', 'documented-by',
+    'blocks', 'blocked-by',
+    'duplicates', 'duplicated-by',
+    'parent', 'child',
+    'relates',
+    # Special case: not a relation, but it can appear where relations appear in
+    # link data structures.
+    'note'
+]
+
+# A "relation": "link" subtype.
+#
+# An example from TMT docs says:
+#
+# link:
+#   verifies: /stories/cli/init/base
+#
+# link:
+#     blocked-by:
+#         url: https://github.com/teemtee/fmf
+#         name: /stories/select/filter/regexp
+#     note: Need to get the regexp filter working first.
+
+_RawLinkRelationAwareType = Dict[_RawLinkRelationType, Union[str, FmfIdType]]
+
+_RawLinkType = Union[
+    # link: https://github.com/teemtee/tmt/issues/461
+    str,
+    FmfIdType,
+    _RawLinkRelationAwareType,
+
+    # link:
+    # - verifies: /stories/cli/init/base
+    # - verifies: https://bugzilla.redhat.com/show_bug.cgi?id=1234
+    List[Union[str, FmfIdType, _RawLinkRelationAwareType]],
+]
+
+
+#
+# Sanity and type checks for keys of Core class and its children
+#
+
+def _is_union(type_: Type) -> bool:
+    """ Decide whether the given type is an union or not. """
+
+    # According to typing.py, special typing constructs like Union or Optional have
+    # __origin__ attribute, holding the original subscripted type.
+    return hasattr(type_, '__origin__') and type_.__origin__ is Union
+
+
+def _format_type(type_) -> str:
+    """ Helper providing reasonably well formatted name of a given type. """
+
+    if type_ == type(None):
+        return 'null'
+
+    if hasattr(type_, '__origin__'):
+        if type_.__origin__ is list:
+            return f'list of ({_format_type(type_.__args__[0])})'
+
+        if type_.__origin__ is dict:
+            return f'mapping ({_format_type(type_.__args__[0])}:{_format_type(type_.__args__[1])})'
+
+        if type_.__origin__ is Literal:
+            return ' or '.join(f'"{item}"' for item in type_.__args__)
+
+    if _is_union(type_):
+        return ' or '.join(_format_type(component_type)
+                           for component_type in type_.__args__)
+
+    if type_ == str:
+        return 'string'
+
+    if type_ == list:
+        return 'list'
+
+    if type_ == dict:
+        return 'mapping'
+
+    if type_ == bool:
+        return 'boolean'
+
+    if type_ == int:
+        return 'integer'
+
+    if type_ == float:
+        return 'floating-point number'
+
+    if type_ == Link:
+        return 'Fmf link'
+
+    if type_ == FmfIdType:
+        return 'Fmf id'
+
+    if isinstance(type_, ForwardRef):
+        return _format_type(type_._evaluate(globals(), locals()))
+
+    raise NotImplementedError(
+        f'type {type_} has no human-readable description')
+
+
+def _check_list(
+    parent: '_DeclarativeKeys',
+    address: str,
+    shift: int,
+    value: Any,
+    expected_type: Type,
+    errors: List[str]
+) -> bool:
+    """
+    Verify that a given value matches expected type, where expected type is
+    a list of items.
+
+    Args:
+      parent: an object owning the key that's being validated.
+      address: location of the value within its container(s). Used to provide better
+          location when reporting issues.
+      shift: how far should be log messages indented.
+      value: an object to validate.
+      expected_type: a type ``value`` is supposed to be of.
+      errors: accumulator for errors found during validation process.
+
+    Returns:
+      ``True`` when validation succeeded, ``False`` otherwise.
+    """
+
+    actual_type = type(value)
+
+    parent.debug(
+        '_check_list',
+        f'{value} of type {_format_type(actual_type)}, expected to be {_format_type(expected_type)}',
+        shift=shift)
+
+    if not isinstance(value, list):
+        errors.append(
+            f'{address} expected to be {_format_type(expected_type)}, found {_format_type(actual_type)}')
+
+        return False
+
+    if not len(value):
+        parent.debug('_check_list', 'no items detected', shift=shift)
+
+        return True
+
+    if not hasattr(expected_type, '__args__') or not expected_type.__args__:
+        raise NotImplementedError(
+            f'Type >>{actual_type}<< not recognized as list')
+
+    vt = expected_type.__args__[0]
+
+    if vt is Any:
+        return True
+
+    for i, v in enumerate(value):
+        if not _check_type(
+            parent,
+            f'{address}[{i}]',
+            shift + 1,
+            v,
+            vt,
+                errors):
+            errors.append(
+                f'value of {address}[{i}] expected to be {_format_type(vt)}, found {_format_type(type(v))}')
+
+            return False
+
+    return True
+
+
+def _check_dict(
+    parent: '_DeclarativeKeys',
+    address: str,
+    shift: int,
+    value: Any,
+    expected_type: Type,
+    errors: List[str]
+) -> bool:
+    """
+    Verify that a given value matches expected type, where expected type is
+    a dictionary.
+
+    Args:
+      parent: an object owning the key that's being validated.
+      address: location of the value within its container(s). Used to provide better
+          location when reporting issues.
+      shift: how far should be log messages indented.
+      value: an object to validate.
+      expected_type: a type ``value`` is supposed to be of.
+      errors: accumulator for errors found during validation process.
+
+    Returns:
+      ``True`` when validation succeeded, ``False`` otherwise.
+    """
+
+    actual_type = type(value)
+
+    parent.debug(
+        '_check_dict',
+        f'{value} of type {_format_type(actual_type)}, expected to be {_format_type(expected_type)}',
+        shift=shift)
+
+    if not isinstance(value, dict):
+        errors.append(
+            f'{address} expected to be {_format_type(expected_type)}, found {_format_type(actual_type)}')
+
+        return False
+
+    if not len(value):
+        parent.debug('_check_dict', 'no items detected', shift=shift)
+
+        return True
+
+    if not hasattr(
+            expected_type,
+            '__args__') or len(
+            expected_type.__args__) != 2:
+        raise NotImplementedError(
+            f'Type >>{actual_type}<< not recognized as dict')
+
+    kt = expected_type.__args__[0]
+    vt = expected_type.__args__[1]
+
+    for k, v in value.items():
+        if kt is not Any and not _check_type(
+                parent, f'{address}, key {k}', shift + 1, k, kt, errors):
+            errors.append(
+                f'key "{k}" in {address} expected to be {_format_type(kt)}, found {_format_type(type(k))}')
+
+            return False
+
+        if vt is not Any and not _check_type(
+                parent, f'{address}[{k}]', shift + 1, v, vt, errors):
+            errors.append(
+                f'value of {address}[{k}] expected to be "{_format_type(vt)}", found {_format_type(type(v))}')
+
+            return False
+
+    return True
+
+
+def _check_union(
+    parent: '_DeclarativeKeys',
+    address: str,
+    shift: int,
+    value: Any,
+    expected_type: Type,
+    errors: List[str]
+) -> bool:
+    """
+    Verify that a given value matches expected type, where expected type is
+    an Union of multiple allowed types.
+
+    Args:
+      parent: an object owning the key that's being validated.
+      address: location of the value within its container(s). Used to provide better
+          location when reporting issues.
+      shift: how far should be log messages indented.
+      value: an object to validate.
+      expected_type: a type ``value`` is supposed to be of.
+      errors: accumulator for errors found during validation process.
+
+    Returns:
+      ``True`` when validation succeeded, ``False`` otherwise.
+    """
+
+    actual_type = type(value)
+
+    parent.debug(
+        '_check_union',
+        f'{value} of type {_format_type(actual_type)}, expected to be {_format_type(expected_type)}',
+        shift=shift)
+
+    if any(_check_type(parent, address, shift + 1, value, component_type, errors)
+           for component_type in expected_type.__args__):
+        return True
+
+    errors.append(
+        f'value of {address} expected to be {_format_type(expected_type)}, found {_format_type(actual_type)}')
+
+    return False
+
+
+def _check_type(
+    parent: '_DeclarativeKeys',
+    address: str,
+    shift: int,
+    value: Any,
+    expected_type: Type,
+    errors: List[str]
+) -> bool:
+    """
+    Verify that a given value matches expected type.
+
+    This is the main entrypoint of "verify type" functions, and dispatches
+    calls to other functions for more specific types as needed.
+
+    Args:
+      parent: an object owning the key that's being validated.
+      address: location of the value within its container(s). Used to provide better
+          location when reporting issues.
+      shift: how far should be log messages indented.
+      value: an object to validate.
+      expected_type: a type ``value`` is supposed to be of.
+      errors: accumulator for errors found during validation process.
+
+    Returns:
+      ``True`` when validation succeeded, ``False`` otherwise.
+    """
+
+    if isinstance(expected_type, ForwardRef):
+        parent.debug(
+            '_check_type',
+            f'detected forward reference >>{expected_type}<<',
+            shift=shift)
+
+        return _check_type(
+            parent,
+            address,
+            shift + 1,
+            value,
+            expected_type._evaluate(globals(), locals()),
+            errors
+            )
+
+    actual_type = type(value)
+
+    parent.debug(
+        '_check_type',
+        f'{value} of type {_format_type(actual_type)}, expected to be {_format_type(expected_type)}',
+        shift=shift)
+
+    if hasattr(expected_type, '__origin__'):
+        if expected_type.__origin__ is Union:
+            return _check_union(
+                parent,
+                address,
+                shift + 1,
+                value,
+                expected_type,
+                errors)
+
+        if expected_type.__origin__ is list:
+            return _check_list(
+                parent,
+                address,
+                shift + 1,
+                value,
+                expected_type,
+                errors)
+
+        if expected_type.__origin__ is dict:
+            return _check_dict(
+                parent,
+                address,
+                shift + 1,
+                value,
+                expected_type,
+                errors)
+
+        if expected_type.__origin__ is Literal:
+            return value in expected_type.__args__
+
+        raise NotImplementedError(
+            f'type.__origin__ {expected_type.__origin__} is not supported')
+
+    elif inspect.isclass(expected_type):
+        if expected_type is Link:
+            parent.debug('_check_type', f'detected link type', shift=shift)
+
+            return _check_type(
+                parent,
+                address,
+                shift + 1,
+                value,
+                _RawLinkType,
+                errors)
+
+        if expected_type is FmfIdType:
+            parent.debug('_check_type', f'detected fmf id type', shift=shift)
+
+            return _check_type(parent, address, shift +
+                               1, value, Dict[str, Optional[str]], errors)
+
+        if _is_union(expected_type):
+            return _check_union(
+                parent,
+                address,
+                shift + 1,
+                value,
+                expected_type,
+                errors)
+
+        return isinstance(value, expected_type)
+
+    if isinstance(value, expected_type):
+        return True
+
+    # WARNING: not all types are supported! The extent of support is dictated
+    # by needs of classes derived from tmt.base.Core and keys they wish to
+    # import from fmf.Tree objects they own. When encountering a perfectly legal
+    # type being not supported yet, feel free to implement necessary checks.
+
+    errors.append(
+        f'{address}: expected type {_format_type(expected_type)}, found {_format_type(actual_type)}')
+
+    raise NotImplementedError(
+        f'type {_format_type(expected_type)} is not supported')
+
+
+class _DeclarativeKeys:
+    """ Mixin adding support for Fmf-backed keys with declared types. """
+
+    KEYS_SHOW_ORDER: List[str] = []
+
+    def _iter_key_annotations(self) -> Generator[Tuple[str, Any], None, None]:
+        """
+        Iterate over keys' type annotations.
+
+        Keys are yielded in the order: keys declared by parent classes, then
+        keys declared by the class itself.
+
+        Yields:
+            pairs of key name and its annotations.
+        """
+
+        for base in self.__class__.__bases__:
+            yield from base.__dict__.get('__annotations__', {}).items()
+
+        yield from self.__class__.__dict__.get('__annotations__', {}).items()
+
+    def iter_key_names(self) -> Generator[str, None, None]:
+        """
+        Iterate over key names.
+
+        Keys are yielded in the order: keys declared by parent classes, then
+        keys declared by the class itself.
+
+        Yields:
+            key names.
+        """
+
+        for keyname, _ in self._iter_key_annotations():
+            yield keyname
+
+    def iter_keys(self) -> Generator[Tuple[str, Any], None, None]:
+        """
+        Iterate over keys and their values.
+
+        Keys are yielded in the order: keys declared by parent classes, then
+        keys declared by the class itself.
+
+        Yields:
+            pairs of key name and its value.
+        """
+
+        for keyname in self.iter_key_names():
+            yield (keyname, getattr(self, keyname))
+
+    # TODO: exists for backward compatibility for the transition period. Once full
+    # type annotations land, there should be no need for extra _keys attribute.
+    @property
+    def _keys(self) -> List[str]:
+        """ Return a list of names of object's keys. """
+
+        return list(self.iter_key_names())
+
+    def _extract_keys(self, node) -> None:
+        """ Extract values for class-level attributes, and verify they match declared types. """
+
+        self.debug('key validation', node.name)
+
+        for keyname, keytype in self._iter_key_annotations():
+            key_address = f'{node.name}:{keyname}'
+
+            shift = 2
+
+            self.debug('key', key_address, shift=shift)
+
+            shift += 1
+
+            self.debug('expected type', _format_type(keytype), shift=shift)
+
+            if hasattr(self, keyname):
+                # If the key exists as instance's attribute already, it is because it's been declared
+                # with a default value, and the attribute now holds said
+                # default value.
+                default_value = getattr(self, keyname)
+
+                self.debug('default value', default_value, shift=shift)
+                self.debug(
+                    'default value type',
+                    _format_type(
+                        type(default_value)),
+                    shift=shift)
+
+                # Try to read the value stored in fmf node, and honor the
+                # default value.
+                value = node.get(keyname, default=default_value)
+
+                self.debug('raw value', value, shift=shift)
+                self.debug(
+                    'raw value type', _format_type(
+                        type(value)), shift=shift)
+
+                # Special case, apply listify() if key is supposed to be a
+                # list.
+                if default_value == []:
+                    value = tmt.utils.listify(value)
+
+            else:
+                value = node.get(keyname)
+
+                self.debug('raw value', value, shift=shift)
+                self.debug(
+                    'raw value type', _format_type(
+                        type(value)), shift=shift)
+
+            self.debug('value', value, shift=shift)
+            self.debug('value type', _format_type(type(value)), shift=shift)
+
+            errors = []
+
+            if not _check_type(
+                self,
+                f'{node.name}:{keyname}',
+                shift,
+                value,
+                keytype,
+                    errors):
+                raise tmt.utils.SpecificationError(
+                    '\n'.join([
+                        f'Invalid key under {node.name}:'
+                        ] + [
+                        f'  * {error}'
+                        for error in reversed(errors)
+                        ])
+                    )
+
+            # TODO: find a way how to attach "post-validation" callbacks for
+            # value conversions
+            if keyname == 'link':
+                value = Link(value)
+
+            self.debug(f'final value', value, shift=shift)
+            self.debug(
+                f'final value type',
+                _format_type(
+                    type(value)),
+                shift=shift)
+
+            setattr(self, keyname, value)
+
+            # Apparently pointless, but makes the debugging output more readable.
+            # There may be plenty of tests and plans and keys, a bit of spacing
+            # can't hurt.
+            self.debug('')
+
+    def __init__(self, node, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self._extract_keys(node)
+
+
+class Core(_DeclarativeKeys, tmt.utils.Common):
     """
     General node object
 
@@ -83,11 +666,24 @@ class Core(tmt.utils.Common):
     """
 
     # Core attributes (supported across all levels)
-    _keys = ['summary', 'description', 'enabled', 'order', 'link', 'adjust']
+    summary: Optional[str] = None
+    description: Optional[str] = None
+    enabled: bool = True
+    order: int = DEFAULT_ORDER
+    link: Optional['Link'] = None
+    adjust: Optional[str] = None
+
+    KEYS_SHOW_ORDER = [
+        'summary',
+        'description',
+        'enabled',
+        'order',
+        'link',
+        'adjust']
 
     def __init__(self, node, parent=None):
         """ Initialize the node """
-        super(Core, self).__init__(parent=parent, name=node.name)
+        super().__init__(node, parent=parent, name=node.name)
         self.node = node
 
         # Store original metadata with applied defaults and including
@@ -95,20 +691,6 @@ class Core(tmt.utils.Common):
         # Once the whole node has been initialized,
         # self._update_metadata() must be called to work correctly.
         self._metadata = self.node.data.copy()
-
-        # Set all core attributes
-        for key in self._keys:
-            setattr(self, key, self.node.get(key))
-
-        # Check whether the node is enabled, handle the default
-        self._check('enabled', expected=bool, default=True)
-
-        # Check whether the order is integer, handle the default
-        self._check('order', expected=int, default=DEFAULT_ORDER)
-
-        # Convert link into the canonical form, store the object
-        self._link = Link(self.link)
-        self.link = self._link.get()
 
     def __str__(self):
         """ Node name """
@@ -123,30 +705,6 @@ class Core(tmt.utils.Common):
         """ Show source files """
         echo(tmt.utils.format(
             'sources', self.node.sources, key_color='magenta'))
-
-    def _check(self, key, expected, default=None, listify=False):
-        """
-        Check that the key is of expected type
-
-        Handle default and convert into a list if requested.
-        """
-        value = getattr(self, key)
-        # Handle default
-        if value is None:
-            setattr(self, key, default)
-            return
-        # Check for correct type
-        if not isinstance(value, expected):
-            expected = tmt.utils.listify(expected)
-            expected_names = fmf.utils.listed(
-                [type_.__name__ for type_ in expected], join='or')
-            class_name = self.__class__.__name__.lower()
-            raise tmt.utils.SpecificationError(
-                f"Invalid '{key}' in {class_name} '{self.name}' (should be "
-                f"a '{expected_names}', got a '{type(value).__name__}').")
-        # Convert into a list if requested
-        if listify:
-            setattr(self, key, tmt.utils.listify(value))
 
     def _fmf_id(self):
         """ Show fmf identifier """
@@ -272,7 +830,7 @@ class Core(tmt.utils.Common):
                 relation, target = ".*", parts[0]
             else:
                 relation, target = parts
-        for candidate in self.link:
+        for candidate in self.link.get():
             candidate_relation = get_relation(candidate)
             candidate_target = candidate[candidate_relation]
             if (re.search(relation, candidate_relation)
@@ -287,8 +845,27 @@ Node = Core
 class Test(Core):
     """ Test object (L1 Metadata) """
 
-    # Supported attributes (listed in display order)
-    _keys = [
+    # Basic test information
+    contact: List[str] = []
+    component: List[str] = []
+
+    # Test execution data
+    test: str
+    path: Optional[str] = None
+    framework: Optional[str] = None
+    manual: bool = False
+    require: List[str] = []
+    recommend: List[str] = []
+    # TODO: original code applies str() to all values, which new code doesn't
+    environment: Optional[tmt.utils.EnvironmentType] = {}
+    duration: Optional[str] = DEFAULT_TEST_DURATION_L1
+    result: str = 'respect'
+
+    # Filtering attributes
+    tag: List[str] = []
+    tier: Optional[str] = None
+
+    KEYS_SHOW_ORDER = [
         # Basic test information
         'summary',
         'description',
@@ -338,47 +915,30 @@ class Test(Core):
             node.name = name
         else:
             node = data
-        super().__init__(node)
-
-        # Test script or path to the manual test must be defined
-        self._check('test', expected=str)
-        if self.test is None:
-            raise tmt.utils.SpecificationError(
-                f"The 'test' attribute in '{self.name}' must be defined.")
 
         # Path defaults to the directory where metadata are stored or to
         # the root '/' if fmf metadata were not stored on the filesystem
+        #
+        # NOTE: default value of `path` attribute is not known when attribute
+        # is declared, therefore we need to compute the default value and
+        # assign it to attribute *before* calling superclass and its handy
+        # node key extraction.
         try:
-            directory = os.path.dirname(self.node.sources[-1])
-            relative_path = os.path.relpath(directory, self.node.root)
+            directory = os.path.dirname(node.sources[-1])
+            relative_path = os.path.relpath(directory, node.root)
             if relative_path == '.':
                 default_path = '/'
             else:
                 default_path = os.path.join('/', relative_path)
         except (AttributeError, IndexError):
             default_path = '/'
-        self._check('path', expected=str, default=default_path)
 
-        # Check that lists are lists or strings, listify if needed
-        for key in ['component', 'contact', 'require', 'recommend', 'tag']:
-            self._check(key, expected=(list, str), default=[], listify=True)
+        self.path = default_path
 
-        # FIXME Framework should default to 'shell' in the future. For
-        # backward-compatibility with the old execute methods we need to be
-        # able to detect if the test has explicitly set the framework.
-        self._check('framework', expected=str, default=None)
+        super().__init__(node)
+
         if self.framework == 'beakerlib':
             self.require.append('beakerlib')
-
-        # Check that environment is a dictionary
-        self._check('environment', expected=dict, default={})
-        self.environment = dict([
-            (key, str(value)) for key, value in self.environment.items()])
-
-        # Default duration, manual, enabled and result
-        self._check('duration', expected=str, default=DEFAULT_TEST_DURATION_L1)
-        self._check('manual', expected=bool, default=False)
-        self._check('result', expected=str, default='respect')
 
         self._update_metadata()
 
@@ -433,11 +993,10 @@ class Test(Core):
     def show(self):
         """ Show test details """
         self.ls()
-        for key in self._keys:
+        for key in self.KEYS_SHOW_ORDER:
             value = getattr(self, key)
-            # Special handling for the link attribute
             if key == 'link':
-                self._link.show()
+                value.show()
                 continue
             # No need to show the default order
             if key == 'order' and value == DEFAULT_ORDER:
@@ -577,6 +1136,8 @@ class Test(Core):
 class Plan(Core):
     """ Plan object (L2 Metadata) """
 
+    gate: Optional[List[str]] = None
+
     extra_L2_keys = [
         'context',
         'environment',
@@ -612,12 +1173,6 @@ class Plan(Core):
             self.node.get('report'), self)
         self.finish = tmt.steps.finish.Finish(
             self.node.get('finish'), self)
-
-        # Relevant gates (convert to list if needed)
-        self.gate = node.get('gate')
-        if self.gate:
-            if not isinstance(self.gate, list):
-                self.gate = [self.gate]
 
         # Test execution context defined in the plan
         self._plan_context = self.node.get('context', dict())
@@ -819,7 +1374,7 @@ class Plan(Core):
         echo(tmt.utils.format('enabled', self.enabled, key_color='cyan'))
         if self.order != DEFAULT_ORDER:
             echo(tmt.utils.format('order', self.order, key_color='cyan'))
-        self._link.show()
+        self.link.show()
         if self._fmf_context():
             echo(tmt.utils.format(
                 'context', self._fmf_context(), key_color='blue'))
@@ -1000,8 +1555,11 @@ class Plan(Core):
 class Story(Core):
     """ User story object """
 
-    # Supported attributes (listed in display order)
-    _keys = [
+    example: Union[None, str, List[str]] = None
+    story: str
+    title: Optional[str] = None
+
+    KEYS_SHOW_ORDER = [
         'summary',
         'title',
         'story',
@@ -1009,7 +1567,7 @@ class Story(Core):
         'example',
         'enabled',
         'order',
-        'link',
+        'link'
         ]
 
     def __init__(self, node):
@@ -1020,17 +1578,17 @@ class Story(Core):
     @property
     def documented(self):
         """ Return links to relevant documentation """
-        return self._link.get('documented-by')
+        return self.link.get('documented-by')
 
     @property
     def verified(self):
         """ Return links to relevant test coverage """
-        return self._link.get('verified-by')
+        return self.link.get('verified-by')
 
     @property
     def implemented(self):
         """ Return links to relevant source code """
-        return self._link.get('implemented-by')
+        return self.link.get('implemented-by')
 
     def _match(
             self, implemented, verified, documented, covered,
@@ -1096,10 +1654,10 @@ class Story(Core):
     def show(self):
         """ Show story details """
         self.ls()
-        for key in self._keys:
+        for key in self.KEYS_SHOW_ORDER:
             value = getattr(self, key)
             if key == 'link':
-                self._link.show()
+                value.show()
                 continue
             if key == 'order' and value == DEFAULT_ORDER:
                 continue
@@ -2074,15 +2632,7 @@ class Link(object):
     """ Core attribute link parsing """
 
     # The list of all supported link relations
-    _relations = [
-        'verifies', 'verified-by',
-        'implements', 'implemented-by',
-        'documents', 'documented-by',
-        'blocks', 'blocked-by',
-        'duplicates', 'duplicated-by',
-        'parent', 'child',
-        'relates',
-        ]
+    _relations = LINK_RELATIONS
 
     # The list of valid fmf id keys
     _fmf_id_keys = ['url', 'ref', 'path', 'name']
