@@ -789,8 +789,17 @@ class Core(_DeclarativeKeys, tmt.utils.Common):
 
         # Always include node name, add requested keys, ignore adjust
         data = dict(name=self.name)
-        data.update(dict([(key, getattr(self, key)) for key in keys]))
-        data.pop('adjust', None)
+        for key in keys:
+            if key == 'adjust':
+                continue
+
+            value = getattr(self, key)
+
+            if key == 'link':
+                data[key] = value.links
+
+            else:
+                data[key] = value
 
         # Choose proper format
         if format_ == 'dict':

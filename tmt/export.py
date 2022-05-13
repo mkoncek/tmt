@@ -463,7 +463,7 @@ def export_to_nitrate(test):
 
     # List of bugs test verifies
     verifies_bug_ids = []
-    for link in test.link:
+    for link in test.link.get():
         try:
             verifies_bug_ids.append(
                 int(re.search(RE_BUGZILLA_URL, link['verifies']).group(1)))
