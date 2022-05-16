@@ -184,9 +184,6 @@ def is_fmf_id(type_: type) -> bool:
 def format_type(type_: type) -> str:
     """ Helper providing reasonably well formatted name of a given type. """
 
-    if isinstance(None, type_):
-        return 'null'
-
     if is_list(type_):
         vt = extract_list_members(type_)[0]
 
@@ -210,6 +207,9 @@ def format_type(type_: type) -> str:
 
     if is_fmf_id(type_):
         return 'Fmf id'
+
+    if isinstance(None, type_):
+        return 'null'
 
     if type_ == str:
         return 'string'
@@ -610,6 +610,7 @@ class DeclarativeKeys:
 
             shift += 1
 
+            logger('expected type', str(keytype), shift=shift)
             logger('expected type', format_type(keytype), shift=shift)
 
             if hasattr(self, keyname):
