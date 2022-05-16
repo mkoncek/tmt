@@ -39,6 +39,13 @@ else:
     from typing import ForwardRef
 
 
+# autopep8 insist on rewriting the test: `type_ is type(None)` is the right way to do one particular
+# check, because the type may indeed be literally `None`, but autopep8 does not like that. Save the
+# type and use it in the test, autopep8 is fine with that (or it just does
+# not understand that cheat).
+_NoneType = type(None)
+
+
 # A type describing core `link` attribute. See https://tmt.readthedocs.io/en/stable/spec/core.html#link
 # for its formal specification, the gist is: there can be several
 # combinations of various data structures.
@@ -207,10 +214,6 @@ def format_type(type_: type) -> str:
 
     if is_fmf_id(type_):
         return 'Fmf id'
-
-    # autopep8 insist on rewriting the test: `type_ is type(None)` is the right way to do it, because
-    # the type may indeed be literally `None`.
-    _NoneType = type(None)
 
     if type_ is _NoneType:
         return 'null'
