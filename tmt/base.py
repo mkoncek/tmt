@@ -278,7 +278,7 @@ class Test(Core):
     path: Optional[str] = None
     framework: Optional[str] = None
     manual: bool = False
-    require: List[str] = []
+    require: List[Union[str, FmfIdType]] = []
     recommend: List[str] = []
     # TODO: original code applies str() to all values, which new code doesn't
     environment: Optional[tmt.utils.EnvironmentType] = {}
