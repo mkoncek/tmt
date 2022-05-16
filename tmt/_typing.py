@@ -208,7 +208,11 @@ def format_type(type_: type) -> str:
     if is_fmf_id(type_):
         return 'Fmf id'
 
-    if isinstance(None, type_):
+    # autopep8 insist on rewriting the test: `type_ is type(None)` is the right way to do it, because
+    # the type may indeed be literally `None`.
+    _NoneType = type(None)
+
+    if type_ is _NoneType:
         return 'null'
 
     if type_ == str:
@@ -610,7 +614,6 @@ class DeclarativeKeys:
 
             shift += 1
 
-            logger('expected type', str(keytype), shift=shift)
             logger('expected type', format_type(keytype), shift=shift)
 
             if hasattr(self, keyname):
