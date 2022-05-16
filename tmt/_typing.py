@@ -215,6 +215,9 @@ def format_type(type_: type) -> str:
     if is_fmf_id(type_):
         return 'Fmf id'
 
+    if type_ == Any:
+        return 'anything'
+
     if type_ is _NoneType:
         return 'null'
 
@@ -473,6 +476,9 @@ def check_type(
         '_check_type',
         f'{value} of type {format_type(actual_type)}, expected to be {format_type(expected_type)}',
         shift=shift)
+
+    if expected_type is Any:
+        return True
 
     if is_list(expected_type):
         return _check_list(
