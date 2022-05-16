@@ -85,7 +85,8 @@ class Core(tmt._typing.DeclarativeKeys, tmt.utils.Common):
     enabled: bool = True
     order: int = DEFAULT_ORDER
     link: Optional['Link'] = None
-    adjust: Optional[str] = None
+    # TODO: Any is just wrong... adjust key has a structure, let's use it.
+    adjust: Optional[Any] = None
 
     KEYS_SHOW_ORDER = [
         'summary',
@@ -286,7 +287,7 @@ class Test(Core):
 
     # Filtering attributes
     tag: List[str] = []
-    tier: Optional[str] = None
+    tier: Optional[Union[str, int]] = None
 
     KEYS_SHOW_ORDER = [
         # Basic test information
