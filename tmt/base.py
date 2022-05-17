@@ -118,6 +118,22 @@ _RawLinkType = Union[
 ]
 
 
+# A type describing `adjust` content. See https://tmt.readthedocs.io/en/stable/spec/core.html#adjust
+# for its formal specification.
+#
+# The type is incomplete in the sense it does not describe all keys it may contain,
+# like `environment` or `provision`, and focuses only on the keys defined for `adjust`
+# itself.
+AdjustRuleType = tmt._typing.TypedDict(
+    'AdjustRuleType',
+    {
+        'when': str,
+        'continue': Optional[bool],
+        'because': Optional[str]
+        }
+)
+
+
 class Core(tmt.keys.LoadKeys, tmt.utils.Common):
     """
     General node object
@@ -133,8 +149,7 @@ class Core(tmt.keys.LoadKeys, tmt.utils.Common):
     enabled: bool = True
     order: int = DEFAULT_ORDER
     link: Optional['Link'] = None
-    # TODO: Any is just wrong... adjust key has a structure, let's use it.
-    adjust: Optional[Any] = None
+    adjust: Optional[List[AdjustRuleType]] = None
 
     KEYS_SHOW_ORDER = [
         'summary',
@@ -144,9 +159,13 @@ class Core(tmt.keys.LoadKeys, tmt.utils.Common):
         'link',
         'adjust']
 
-    @staticmethod
-    def _normalize_link(value: _RawLinkType) -> 'Link':
+    def _normalize_link(self, value: _RawLinkType) -> 'Link':
         return Link(data=value)
+
+    def _normalize_adjust(self,
+                          value: Union[AdjustRuleType,
+                                       List[AdjustRuleType]]) -> List[AdjustRuleType]:
+        return [value] if not isinstance(value, list) else value
 
     def __init__(self, node, parent=None):
         """ Initialize the node """
