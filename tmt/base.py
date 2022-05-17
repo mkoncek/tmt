@@ -150,7 +150,13 @@ class Core(tmt.keys.LoadKeys, tmt.utils.Common):
 
     def __init__(self, node, parent=None):
         """ Initialize the node """
-        super().__init__(node, self.debug, parent=parent, name=node.name)
+        super(
+            Core,
+            self).__init__(
+            node,
+            self.debug,
+            parent=parent,
+            name=node.name)
         self.node = node
 
         # Store original metadata with applied defaults and including
@@ -355,9 +361,10 @@ class Test(Core):
 
         return [value] if isinstance(value, str) else value
 
-    def _normalize_tier(self, value: Optional[Union[int, str]]) -> List[str]:
+    def _normalize_tier(
+            self, value: Optional[Union[int, str]]) -> Optional[str]:
         if value is None:
-            return []
+            return None
 
         return str(value)
 
