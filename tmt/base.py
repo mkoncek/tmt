@@ -3,14 +3,12 @@
 
 import copy
 import functools
-import inspect
 import os
 import re
 import shutil
 import subprocess
-import sys
 import time
-from typing import Any, Dict, Generator, List, Optional, Tuple, Type, Union
+from typing import Any, Dict, List, Optional, Union
 
 import click
 import fmf
