@@ -20,6 +20,7 @@ from ruamel.yaml.error import MarkedYAMLError
 
 import tmt._typing
 import tmt.export
+import tmt.keys
 import tmt.steps
 import tmt.steps.discover
 import tmt.steps.execute
@@ -70,7 +71,56 @@ class FmfIdType(tmt._typing.TypedDict):
     name: Optional[str]
 
 
-class Core(tmt._typing.DeclarativeKeys, tmt.utils.Common):
+# A type describing the raw form of the core `link` attribute. See
+# https://tmt.readthedocs.io/en/stable/spec/core.html#link for its
+# formal specification. Internally, the data is wrapped with `Link`
+# instances, the type below describes the raw data coming from Fmf
+# nodes.
+
+# TODO: `*Link._relations` would be much better, DRY, but that's allowed
+# since Python 3.11.
+_RawLinkRelationType = tmt._typing.Literal[
+    'verifies', 'verified-by',
+    'implements', 'implemented-by',
+    'documents', 'documented-by',
+    'blocks', 'blocked-by',
+    'duplicates', 'duplicated-by',
+    'parent', 'child',
+    'relates',
+    # Special case: not a relation, but it can appear where relations appear in
+    # link data structures.
+    'note'
+]
+
+# A "relation": "link" subtype.
+#
+# An example from TMT docs says:
+#
+# link:
+#   verifies: /stories/cli/init/base
+#
+# link:
+#     blocked-by:
+#         url: https://github.com/teemtee/fmf
+#         name: /stories/select/filter/regexp
+#     note: Need to get the regexp filter working first.
+
+_RawLinkRelationAwareType = Dict[_RawLinkRelationType, Union[str, FmfIdType]]
+
+_RawLinkType = Union[
+    # link: https://github.com/teemtee/tmt/issues/461
+    str,
+    FmfIdType,
+    _RawLinkRelationAwareType,
+
+    # link:
+    # - verifies: /stories/cli/init/base
+    # - verifies: https://bugzilla.redhat.com/show_bug.cgi?id=1234
+    List[Union[str, FmfIdType, _RawLinkRelationAwareType]],
+]
+
+
+class Core(tmt.keys.LoadKeys, tmt.utils.Common):
     """
     General node object
 
@@ -95,6 +145,10 @@ class Core(tmt._typing.DeclarativeKeys, tmt.utils.Common):
         'order',
         'link',
         'adjust']
+
+    @staticmethod
+    def _normalize_link(value: _RawLinkType) -> 'Link':
+        return Link(data=value)
 
     def __init__(self, node, parent=None):
         """ Initialize the node """
@@ -280,14 +334,34 @@ class Test(Core):
     manual: bool = False
     require: List[Union[str, FmfIdType]] = []
     recommend: List[str] = []
-    # TODO: original code applies str() to all values, which new code doesn't
     environment: Optional[tmt.utils.EnvironmentType] = {}
     duration: Optional[str] = DEFAULT_TEST_DURATION_L1
     result: str = 'respect'
 
     # Filtering attributes
     tag: List[str] = []
-    tier: Optional[Union[str, int]] = None
+    tier: Optional[str] = None
+
+    _normalize_contact = tmt.keys.LoadKeys._normalize_string_list
+    _normalize_component = tmt.keys.LoadKeys._normalize_string_list
+    _normalize_recommend = tmt.keys.LoadKeys._normalize_string_list
+    _normalize_tag = tmt.keys.LoadKeys._normalize_string_list
+
+    def _normalize_require(self,
+                           value: Optional[Union[str,
+                                                 List[str],
+                                                 FmfIdType]]) -> List[Union[str,
+                                                                            FmfIdType]]:
+        if value is None:
+            return []
+
+        return [value] if isinstance(value, str) else value
+
+    def _normalize_tier(self, value: Optional[Union[int, str]]) -> List[str]:
+        if value is None:
+            return []
+
+        return str(value)
 
     KEYS_SHOW_ORDER = [
         # Basic test information
@@ -560,7 +634,11 @@ class Test(Core):
 class Plan(Core):
     """ Plan object (L2 Metadata) """
 
-    gate: Optional[List[str]] = None
+    # TODO: context
+    # TODO: discover
+    gate: List[str] = []
+
+    _normalize_gate = tmt.keys.LoadKeys._normalize_string_list
 
     extra_L2_keys = [
         'context',
@@ -979,9 +1057,11 @@ class Plan(Core):
 class Story(Core):
     """ User story object """
 
-    example: Union[None, str, List[str]] = None
+    example: List[str] = []
     story: str
     title: Optional[str] = None
+
+    _normalize_example = tmt.keys.LoadKeys._normalize_string_list
 
     KEYS_SHOW_ORDER = [
         'summary',
