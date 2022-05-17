@@ -77,7 +77,7 @@ class FmfIdType(tmt._typing.TypedDict):
 
 # TODO: `*Link._relations` would be much better, DRY, but that's allowed
 # since Python 3.11.
-_RawLinkRelationType = tmt._typing.Literal[
+_LinkRelationType = tmt._typing.Literal[
     'verifies', 'verified-by',
     'implements', 'implemented-by',
     'documents', 'documented-by',
@@ -103,18 +103,18 @@ _RawLinkRelationType = tmt._typing.Literal[
 #         name: /stories/select/filter/regexp
 #     note: Need to get the regexp filter working first.
 
-_RawLinkRelationAwareType = Dict[_RawLinkRelationType, Union[str, FmfIdType]]
+_LinkRelationAwareType = Dict[_LinkRelationType, Union[str, FmfIdType]]
 
-_RawLinkType = Union[
+_LinkType = Union[
     # link: https://github.com/teemtee/tmt/issues/461
     str,
     FmfIdType,
-    _RawLinkRelationAwareType,
+    _LinkRelationAwareType,
 
     # link:
     # - verifies: /stories/cli/init/base
     # - verifies: https://bugzilla.redhat.com/show_bug.cgi?id=1234
-    List[Union[str, FmfIdType, _RawLinkRelationAwareType]],
+    List[Union[str, FmfIdType, _LinkRelationAwareType]],
 ]
 
 
@@ -159,7 +159,7 @@ class Core(tmt.keys.LoadKeys, tmt.utils.Common):
         'link',
         'adjust']
 
-    def _normalize_link(self, value: _RawLinkType) -> 'Link':
+    def _normalize_link(self, value: _LinkType) -> 'Link':
         return Link(data=value)
 
     def _normalize_adjust(self,
@@ -2173,7 +2173,7 @@ class Link(object):
     # The list of valid fmf id keys
     _fmf_id_keys = ['url', 'ref', 'path', 'name']
 
-    def __init__(self, data=None):
+    def __init__(self, data: Optional[_LinkType] = None):
         """ Convert link data into canonical form """
         # Nothing to do if no data provided
         self.links = []
