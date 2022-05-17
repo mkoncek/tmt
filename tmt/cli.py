@@ -76,6 +76,10 @@ def fix(function):
     return tmt.options.fix(function)
 
 
+def workdir_root(function):
+    return tmt.options.workdir_root(function)
+
+
 def name_filter_condition(function):
     """ Common filter options (short & long) """
     options = [
@@ -980,7 +984,7 @@ def init(context, path, template, force, **kwargs):
 
 @main.command()
 @click.pass_context
-@click.argument('path', default=tmt.utils.WORKDIR_ROOT)
+@workdir_root
 @click.option(
     '-i', '--id', metavar="ID",
     help='Run id (name or directory path) to show status of.')
@@ -996,7 +1000,7 @@ def init(context, path, template, force, **kwargs):
     '--finished', is_flag=True, default=False,
     help='List all runs which have all enabled steps completed.')
 @verbose_debug_quiet
-def status(context, path, abandoned, active, finished, **kwargs):
+def status(context, workdir_root, abandoned, active, finished, **kwargs):
     """
     Show status of runs.
 
@@ -1014,8 +1018,8 @@ def status(context, path, abandoned, active, finished, **kwargs):
         raise tmt.utils.GeneralError(
             "Options --abandoned, --active and --finished cannot be "
             "used together.")
-    if not os.path.exists(path):
-        raise tmt.utils.GeneralError(f"Path '{path}' doesn't exist.")
+    if not os.path.exists(workdir_root):
+        raise tmt.utils.GeneralError(f"Path '{workdir_root}' doesn't exist.")
     status_obj = tmt.Status(context=context)
     status_obj.show()
 
@@ -1046,7 +1050,7 @@ def clean(context, **kwargs):
     if context.invoked_subcommand is None:
         echo(style('clean', fg='red'))
         # Set path to default
-        context.params['path'] = tmt.utils.WORKDIR_ROOT
+        context.params['workdir_root'] = tmt.utils.WORKDIR_ROOT
         # Create another level to the hierarchy so that logging indent is
         # consistent between the command and subcommands
         clean_obj = tmt.Clean(parent=clean_obj, context=context)
@@ -1065,7 +1069,7 @@ def clean(context, **kwargs):
 
 @clean.command()
 @click.pass_context
-@click.argument('path', default=tmt.utils.WORKDIR_ROOT)
+@workdir_root
 @click.option(
     '-l', '--last', is_flag=True, help='Clean the workdir of the last run.')
 @click.option(
@@ -1076,12 +1080,11 @@ def clean(context, **kwargs):
     help='The number of latest workdirs to keep, clean the rest.')
 @verbose_debug_quiet
 @dry
-def runs(context, path, last, id_, keep, **kwargs):
+def runs(context, workdir_root, last, id_, keep, **kwargs):
     """
     Clean workdirs of past runs.
 
-    Remove all runs in /var/tmp/tmt by default. Path to where runs
-    should be searched can be specified using PATH argument.
+    Remove all runs in /var/tmp/tmt by default.
     """
     echo(style('clean', fg='red'))
     defined = [last is True, id_ is not None, keep is not None]
@@ -1090,8 +1093,8 @@ def runs(context, path, last, id_, keep, **kwargs):
             "Options --last, --id and --keep cannot be used together.")
     if keep is not None and keep < 0:
         raise tmt.utils.GeneralError("--keep must not be a negative number.")
-    if not os.path.exists(path):
-        raise tmt.utils.GeneralError(f"Path '{path}' doesn't exist.")
+    if not os.path.exists(workdir_root):
+        raise tmt.utils.GeneralError(f"Path '{workdir_root}' doesn't exist.")
     exit_code = 0
     if not tmt.Clean(parent=context.obj.clean, context=context).runs():
         exit_code = 1
@@ -1100,7 +1103,7 @@ def runs(context, path, last, id_, keep, **kwargs):
 
 @clean.command()
 @click.pass_context
-@click.argument('path', default=tmt.utils.WORKDIR_ROOT)
+@workdir_root
 @click.option(
     '-l', '--last', is_flag=True, help='Stop the guest of the last run.')
 @click.option(
@@ -1111,19 +1114,18 @@ def runs(context, path, last, id_, keep, **kwargs):
     help='Stop guests of the specified provision method.')
 @verbose_debug_quiet
 @dry
-def guests(context, path, last, id_, **kwargs):
+def guests(context, workdir_root, last, id_, **kwargs):
     """
     Stop running guests of runs.
 
-    Stop guests of all runs in /var/tmp/tmt by default. Path to where
-    runs should be searched can be specified using PATH argument.
+    Stop guests of all runs in /var/tmp/tmt by default.
     """
     echo(style('clean', fg='red'))
     if last and id_ is not None:
         raise tmt.utils.GeneralError(
             "Options --last and --id cannot be used together.")
-    if not os.path.exists(path):
-        raise tmt.utils.GeneralError(f"Path '{path}' doesn't exist.")
+    if not os.path.exists(workdir_root):
+        raise tmt.utils.GeneralError(f"Path '{workdir_root}' doesn't exist.")
     exit_code = 0
     if not tmt.Clean(parent=context.obj.clean, context=context).guests():
         exit_code = 1
