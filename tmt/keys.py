@@ -11,16 +11,12 @@ Validation is a separate step, performed before key loading.
 """
 
 from typing import (TYPE_CHECKING, Any, Dict, Generator, List, Optional, Tuple,
-                    TypeVar, Union)
+                    Union)
 
 import fmf
 
 if TYPE_CHECKING:
     from tmt.utils import BaseLoggerFnType, EnvironmentType
-
-from tmt._typing import final
-
-T = TypeVar('T')
 
 # A type representing compatible sources of keys and values.
 KeySource = Union[Dict[str, Any], fmf.Tree]
