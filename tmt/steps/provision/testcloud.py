@@ -274,14 +274,20 @@ class ProvisionTestcloud(tmt.steps.provision.ProvisionPlugin):
         if not os.path.exists(TESTCLOUD_IMAGES):
             clean.warn(
                 f"Directory '{TESTCLOUD_IMAGES}' does not exist.", shift=2)
-            return
+            return True
+        successful = True
         for image in os.listdir(TESTCLOUD_IMAGES):
             image = os.path.join(TESTCLOUD_IMAGES, image)
             if dry:
                 clean.verbose(f"Would remove '{image}'.", shift=2)
             else:
                 clean.verbose(f"Removing '{image}'.", shift=2)
-                os.remove(image)
+                try:
+                    os.remove(image)
+                except OSError:
+                    clean.error(f"Failed to remove '{image}'", shift=2)
+                    successful = False
+        return successful
 
 
 class GuestTestcloud(tmt.Guest):

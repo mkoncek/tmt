@@ -2,6 +2,8 @@
 
 """ Command line interface for the Test Management Tool """
 
+import collections
+import functools
 import os
 import subprocess
 import sys
@@ -336,12 +338,12 @@ def tests(context, **kwargs):
 #        name will be removed in click 8.1. However, click 8.0 will not
 #        be added to F33 and F34. Get rid of this workaround once
 #        all Fedora + EPEL releases have click 8.0 or newer available.
-callback = run.result_callback
-if callback is None:
-    callback = run.resultcallback
+run_callback = run.result_callback
+if run_callback is None:
+    run_callback = run.resultcallback
 
 
-@callback()
+@run_callback()
 @click.pass_context
 def finito(click_context, commands, *args, **kwargs):
     """ Run tests if run defined """
@@ -1043,12 +1045,17 @@ def clean(context, **kwargs):
     all runs and then remove all images. Search for runs in
     /var/tmp/tmt, if runs are stored elsewhere, the path to them can
     be set using a subcommand (either runs or guests subcommand).
+
+    The subcommands can be chained, the order of cleaning is always
+    the same, irrespective of the order on the command line. First, all
+    the guests are cleaned, followed by runs and images.
     """
+    echo(style('clean', fg='red'))
     clean_obj = tmt.Clean(parent=context.obj, context=context)
     context.obj.clean = clean_obj
+    context.obj.clean_partials = collections.defaultdict(list)
     exit_code = 0
     if context.invoked_subcommand is None:
-        echo(style('clean', fg='red'))
         # Set path to default
         context.params['workdir_root'] = tmt.utils.WORKDIR_ROOT
         # Create another level to the hierarchy so that logging indent is
@@ -1065,6 +1072,30 @@ def clean(context, **kwargs):
                 f"skipping guest and run cleanup.")
         clean_obj.images()
         raise SystemExit(exit_code)
+
+
+# FIXME: Click deprecation, see function finito for more info
+clean_callback = clean.result_callback
+if clean_callback is None:
+    clean_callback = clean.resultcallback
+
+
+@clean_callback()
+@click.pass_context
+def perform_clean(click_context, commands, *args, **kwargs):
+    """
+    Perform clean actions in the correct order.
+
+    We need to ensure that guests are always cleaned before the run workdirs
+    even if the user specified them in reverse order.
+    """
+    clean_order = ("guests", "runs", "images")
+    exit_code = 0
+    for phase in clean_order:
+        for partial in click_context.obj.clean_partials[phase]:
+            if not partial():
+                exit_code = 1
+    raise SystemExit(exit_code)
 
 
 @clean.command()
@@ -1086,7 +1117,6 @@ def runs(context, workdir_root, last, id_, keep, **kwargs):
 
     Remove all runs in /var/tmp/tmt by default.
     """
-    echo(style('clean', fg='red'))
     defined = [last is True, id_ is not None, keep is not None]
     if defined.count(True) > 1:
         raise tmt.utils.GeneralError(
@@ -1095,10 +1125,9 @@ def runs(context, workdir_root, last, id_, keep, **kwargs):
         raise tmt.utils.GeneralError("--keep must not be a negative number.")
     if not os.path.exists(workdir_root):
         raise tmt.utils.GeneralError(f"Path '{workdir_root}' doesn't exist.")
-    exit_code = 0
-    if not tmt.Clean(parent=context.obj.clean, context=context).runs():
-        exit_code = 1
-    raise SystemExit(exit_code)
+    clean_obj = tmt.Clean(parent=context.obj.clean, context=context)
+    context.obj.clean_partials["runs"].append(
+        functools.partial(clean_obj.runs))
 
 
 @clean.command()
@@ -1120,16 +1149,14 @@ def guests(context, workdir_root, last, id_, **kwargs):
 
     Stop guests of all runs in /var/tmp/tmt by default.
     """
-    echo(style('clean', fg='red'))
     if last and id_ is not None:
         raise tmt.utils.GeneralError(
             "Options --last and --id cannot be used together.")
     if not os.path.exists(workdir_root):
         raise tmt.utils.GeneralError(f"Path '{workdir_root}' doesn't exist.")
-    exit_code = 0
-    if not tmt.Clean(parent=context.obj.clean, context=context).guests():
-        exit_code = 1
-    raise SystemExit(exit_code)
+    clean_obj = tmt.Clean(parent=context.obj.clean, context=context)
+    context.obj.clean_partials["guests"].append(
+        functools.partial(clean_obj.guests))
 
 
 @clean.command()
@@ -1143,11 +1170,12 @@ def images(context, **kwargs):
     Currently supported methods are:
      - testcloud
     """
-    echo(style('clean', fg='red'))
     # FIXME: If there are more provision methods supporting this,
     #        we should add options to specify which provision should be
     #        cleaned, similarly to guests.
-    tmt.Clean(parent=context.obj.clean, context=context).images()
+    clean_obj = tmt.Clean(parent=context.obj.clean, context=context)
+    context.obj.clean_partials["images"].append(
+        functools.partial(clean_obj.images))
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #  Lint

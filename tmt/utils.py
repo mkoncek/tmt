@@ -284,7 +284,7 @@ class Common(object):
 
         # Store command line context
         if context:
-            self._save_context(context)
+            self._save_context_to_instance(context)
 
         # Initialize the workdir if requested
         self._workdir_load(workdir)
@@ -298,6 +298,11 @@ class Common(object):
         """ Save provided command line context and options for future use """
         cls._context = context
         cls._options = context.params
+
+    def _save_context_to_instance(self, context: click.Context) -> None:
+        """ Save provided command line context and options to the instance """
+        self._context = context
+        self._options = context.params
 
     @overload
     @classmethod

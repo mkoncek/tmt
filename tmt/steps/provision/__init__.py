@@ -223,6 +223,7 @@ class ProvisionPlugin(tmt.steps.Plugin):
     @classmethod
     def clean_images(cls, clean, dry):
         """ Remove the images of one particular plugin """
+        return True
 
 
 class Guest(tmt.utils.Common):

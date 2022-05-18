@@ -1874,8 +1874,11 @@ class Clean(tmt.utils.Common):
     def images(self):
         """ Clean images of provision plugins """
         self.info('images', color='blue')
+        successful = True
         for method in tmt.steps.provision.ProvisionPlugin.methods():
-            method.class_.clean_images(self, self.opt('dry'))
+            if not method.class_.clean_images(self, self.opt('dry')):
+                successful = False
+        return successful
 
     def _matches_how(self, plan):
         """ Check if the given plan matches options """
