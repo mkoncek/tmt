@@ -214,7 +214,7 @@ class ProvisionPlugin(tmt.steps.Plugin):
         Each ProvisionPlugin has to implement this method.
         Should return a provisioned Guest() instance.
         """
-        raise NotImplementedError
+        raise NotImplementedError()
 
     def requires(self):
         """ List of required packages needed for workdir sync """
@@ -410,7 +410,7 @@ class Guest(tmt.utils.Common):
     def ansible(self, playbook, extra_args=None):
         """ Prepare guest using ansible playbook """
 
-        raise NotImplemented
+        raise NotImplementedError()
 
     def execute(self, command, **kwargs):
         """
@@ -424,21 +424,21 @@ class Guest(tmt.utils.Common):
         If necessary, quote escaping has to be handled by the caller.
         """
 
-        raise NotImplemented
+        raise NotImplementedError()
 
     def push(self, source=None, destination=None, options=None):
         """
         Push files to the guest
         """
 
-        raise NotImplemented
+        raise NotImplementedError()
 
     def pull(self, source=None, destination=None, options=None):
         """
         Pull files from the guest
         """
 
-        raise NotImplemented
+        raise NotImplementedError()
 
     def stop(self):
         """
@@ -449,7 +449,7 @@ class Guest(tmt.utils.Common):
         necessary to store the instance status to disk.
         """
 
-        raise NotImplemented
+        raise NotImplementedError()
 
     def reboot(self, hard=False):
         """
@@ -460,12 +460,12 @@ class Guest(tmt.utils.Common):
         lost. When set to False reboot should be done gracefully.
         """
 
-        raise NotImplemented
+        raise NotImplementedError()
 
     def reconnect(self):
         """ Ensure the connection to the guest is working after reboot """
 
-        raise NotImplemented
+        raise NotImplementedError()
 
     def remove(self):
         """
