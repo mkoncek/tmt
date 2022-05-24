@@ -465,8 +465,23 @@ class Guest(tmt.utils.Common):
 
     def reconnect(self):
         """ Ensure the connection to the guest is working after reboot """
+        # Try to wait for machine to really shutdown sshd
+        # TODO: rename the constant - reconnect() in this form works well even
+        # for ssh-less guests, so there's no point in calling it SSH_*.
+        time.sleep(SSH_INITIAL_WAIT_TIME)
+        self.debug("Wait for a connection to the guest.")
+        for attempt in range(1, CONNECTION_TIMEOUT):
+            try:
+                self.execute('whoami')
+                break
+            except tmt.utils.RunError:
+                self.debug('Failed to connect to the guest, retrying.')
+                time.sleep(1)
 
-        raise NotImplementedError()
+        if attempt == CONNECTION_TIMEOUT:
+            self.debug("Connection to guest failed after reboot.")
+            return False
+        return True
 
     def remove(self):
         """
@@ -798,24 +813,6 @@ class GuestSSH(Guest):
             else:
                 raise
         return self.reconnect()
-
-    def reconnect(self):
-        """ Ensure the connection to the guest is working after reboot """
-        # Try to wait for machine to really shutdown sshd
-        time.sleep(SSH_INITIAL_WAIT_TIME)
-        self.debug("Wait for a connection to the guest.")
-        for attempt in range(1, CONNECTION_TIMEOUT):
-            try:
-                self.execute('whoami')
-                break
-            except tmt.utils.RunError:
-                self.debug('Failed to connect to the guest, retrying.')
-                time.sleep(1)
-
-        if attempt == CONNECTION_TIMEOUT:
-            self.debug("Connection to guest failed after reboot.")
-            return False
-        return True
 
     def remove(self):
         """
