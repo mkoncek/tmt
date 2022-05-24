@@ -238,6 +238,7 @@ class Guest(tmt.utils.Common):
     The following keys are expected in the 'data' dictionary::
 
         role ....... guest role in the multihost scenario
+        guest ...... name, hostname or ip address
 
     These are by default imported into instance attributes (see the
     class attribute '_keys' below).
@@ -245,7 +246,7 @@ class Guest(tmt.utils.Common):
 
     # List of supported keys
     # (used for import/export to/from attributes during load and save)
-    _keys = ['role']
+    _keys = ['role', 'guest']
 
     def __init__(self, data, name=None, parent=None):
         """ Initialize guest data """
@@ -528,7 +529,7 @@ class GuestSSH(Guest):
     The following keys are expected in the 'data' dictionary::
 
         role ....... guest role in the multihost scenario (inherited)
-        guest ...... hostname or ip address
+        guest ...... hostname or ip address (inherited)
         port ....... port to connect to
         user ....... user name to log in
         key ........ path to the private key (str or list)
@@ -540,7 +541,7 @@ class GuestSSH(Guest):
 
     # List of supported keys
     # (used for import/export to/from attributes during load and save)
-    _keys = Guest._keys + ['guest', 'port', 'user', 'key', 'password']
+    _keys = Guest._keys + ['port', 'user', 'key', 'password']
 
     # Master ssh connection process and socket path
     _ssh_master_process = None
