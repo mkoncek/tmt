@@ -48,7 +48,7 @@ class ProvisionLocal(tmt.steps.provision.ProvisionPlugin):
         return GuestLocal.requires()
 
 
-class GuestLocal(tmt.GuestSSH):
+class GuestLocal(tmt.Guest):
     """ Local Host """
 
     def ansible(self, playbook, extra_args=None):
@@ -70,6 +70,16 @@ class GuestLocal(tmt.GuestSSH):
         environment.update(self.parent.plan.environment)
         # Run the command under the prepared environment
         return self.run(command, env=environment, shell=True, **kwargs)
+
+    def stop(self):
+        """ Stop the guest """
+
+        self.debug(f"Doing nothing to stop guest '{self.guest}'.")
+
+    def reboot(self, hard=False):
+        """ Reboot the guest, return True if successful """
+
+        self.debug(f"Doing nothing to reboot guest '{self.guest}'.")
 
     def push(self, source=None, destination=None, options=None):
         """ Nothing to be done to push workdir """
