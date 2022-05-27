@@ -12,12 +12,15 @@ description: |
            defaults to github.com/teemtee/tmt
     BRANCH - branch, commit or tag to checkout,
              defaults to REPO's default branch
-    PRE_RELEASE - when '1' tests keeps version and release
+    KEEP_VERSION - when '1' tests keeps version and release
                   of the spec, otherwise 9.9.9.9 is used
+    SKIP_INSTALL - when '1' tmt is not built nor installed,
+                   is expected to be present on the system
     PLANS - space separated names of plans to execute,
             when not set all enabled plans are run
-    TEST_CMD - when not empty it is placed as is after
+    TESTS_CMD - when not empty it is placed as is after
                `tests` subcommand (e.g. "-n /tests/unit")
+    COVERAGE ... when "1" measure coverage per plan and total
 
 test: ./test.sh
 framework: beakerlib
@@ -34,7 +37,8 @@ require:
 recommend:
 - guestfs-tools
 - python3-docutils
-duration: 4h
+- python3-coverage
+duration: 8h
 extra-hardware: |
   keyvalue=HVM=1
   hostrequire=memory >= 6144

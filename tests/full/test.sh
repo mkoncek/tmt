@@ -2,29 +2,48 @@
 # vim: dict+=/usr/share/beakerlib/dictionary.vim cpt=.,w,b,u,t,i,k
 . /usr/share/beakerlib/beakerlib.sh || exit 1
 
-USER="tmt-tester"
-USER_HOME="/home/$USER"
-
-CONNECT_RUN="/tmp/CONNECT"
+### Configuration variables ###
 
 # Git repository with tmt code (origin or fork or own...)
 REPO="${REPO:-https://github.com/teemtee/tmt}"
-# Branch to checkout (or commit, tag)
-BRANCH="${BRANCH:-}"
-# Set following to 1 if you are running pre-relase
-PRE_RELEASE="${PRE_RELEASE:-0}"
 
-# List of plans to execute (space separated)
-PLANS="${PLANS:-}"
-# Set options for `tests` subcommand
+# Branch to checkout code from, if empty then repos' default
+BRANCH="${BRANCH:-}"
+
+# Set following to 1 if you are running before release
+KEEP_VERSION="${KEEP_VERSION:-0}"
+
+# Skip install if '1' (e.g. plan's prepare has taken care of that)
+SKIP_INSTALL="${SKIP_INSTALL:-0}"
+
+# Set to tmt run's `test <options>` command for test filtering
+# (including 'tests' subcommand)
 TESTS_CMD="${TESTS_CMD:-}"
 
+# Space separated list of plans to execute, empty for all
+PLANS="${PLANS:-}"
+
+# Measure coverage: 1 - yes, 0 - no
+COVERAGE="${COVERAGE:-0}"
+
+### end of configuration ###
+
+USER="tmt-tester"
+USER_HOME="/home/$USER"
+USER_COVERAGERC="$USER_HOME/coveragerc"
+USER_COVER_DIR=$USER_HOME/Coverage
+USER_COVER_FINAL=$USER_COVER_DIR/tmt
+
+CONNECT_RUN="/tmp/CONNECT"
+
 set -o pipefail
+
+TEST_DIR="$(pwd)"
 
 rlJournalStart
     rlPhaseStartSetup
 
-        if [[ $PRE_RELEASE -eq 1 ]]; then
+        if [[ $KEEP_VERSION -eq 1 ]]; then
             [[ -z "$BRANCH" ]] && rlDie "Please set BRANCH when running pre-release"
         fi
 
@@ -41,6 +60,8 @@ rlJournalStart
 
             #better to install SOME tmt than none (python3-html2text missing on rhel-9)
             SKIP_BROKEN="--skip-broken"
+
+            [[ $COVERAGE -eq 1 ]] && rlRun "dnf install python3-coverage"
         fi
 
         rlFileBackup /etc/sudoers
@@ -65,15 +86,20 @@ rlJournalStart
         # Make current commit visible in the log
         rlRun "git show -s | cat"
 
-        # Do not "patch" version for pre-release...
-        [[ $PRE_RELEASE -ne 1 ]] && rlRun "sed 's/^Version:.*/Version: 9.9.9/' -i tmt.spec"
+        # Patch version unless forbidden
+        [[ $KEEP_VERSION -ne 1 ]] && rlRun "sed 's/^Version:.*/Version: 9.9.9/' -i tmt.spec"
 
-        # Build tmt packages
-        rlRun "dnf builddep -y tmt.spec" 0 "Install build dependencies"
-        rlRun "make rpm" || rlDie "Failed to build tmt rpms"
 
-        # From now one we can use tmt (freshly built)
-        rlRun "find $USER_HOME/tmt/tmp/RPMS -type f -name '*rpm' | xargs dnf install -y $SKIP_BROKEN"
+        if [[ $SKIP_INSTALL -eq 1 ]]; then
+            rlLog "Skipping tmt build and install, tmt on the system is \$(rpm -q tmt)"
+        else
+            # Build tmt packages
+            rlRun "dnf builddep -y tmt.spec" 0 "Install build dependencies"
+            rlRun "make rpm" || rlDie "Failed to build tmt rpms"
+
+            # From now one we can use tmt (freshly built)
+            rlRun "find $USER_HOME/tmt/tmp/RPMS -type f -name '*rpm' | xargs dnf install -y $SKIP_BROKEN"
+        fi
 
         # Make sure that libvirt is running
         rlServiceStart "libvirtd"
@@ -124,13 +150,53 @@ rlJournalStart
         if [ -n "$TESTS_CMD" ]; then
           TESTS_CMD="tests $TESTS_CMD"
         fi
+
+        # Coverage setup
+        if [[ $COVERAGE -eq 1 ]]; then
+            # fix shabang
+            rlRun "sed 's;^#!.*;#!/usr/bin/python3;' -i $(command -v tmt)" 0 "Remove -s flag (disables SITECUSTIMIZE)"
+
+            cat <<EOF > $USER_COVERAGERC
+[run]
+data_file=$USER_COVER_FINAL
+parallel=True
+source=
+    $(dirname $(rpm -ql python3-tmt | grep tmt/base.py$))
+    $(command -v tmt)
+EOF
+            USER_SITE="$(su -l -c 'python3 -m site --user-site' $USER)"
+            rlRun "mkdir -p $USER_SITE"
+            rlRun "cp $TEST_DIR/sitecustomize.py $USER_SITE"
+        fi
+            rlRun "chown $USER:$USER -R $USER_HOME"
     rlPhaseEnd
 
     for plan in $PLANS; do
         rlPhaseStartTest "Test: $plan"
             RUN="run$(echo $plan | tr '/' '-')"
+            # unset coverage option
+            export COVERAGE_OPT=
+
+            # /plan/install exercise rpm/pip - tmt might be executed in nested vm/container...
+            # safer to skip coverage generation instead of trying to make it work
+            if [[ $COVERAGE -eq 1 ]] && ! [[ "$plan" =~ /plans/install ]]; then
+                # Separate coverage per run
+                RUN_COV_RC=$USER_HOME/$RUN.coveragerc
+                # keep semicolon at the end
+                export COVERAGE_OPT="export COVERAGE_PROCESS_START=$RUN_COV_RC;"
+                rlRun "sed 's;data_file=.*;data_file=$USER_COVER_FINAL-$RUN;' $USER_COVERAGERC > $RUN_COV_RC"
+            fi
+
             # Core of the test runs as $USER, -l should clear all BEAKER_envs.
-            rlRun "su -l -c 'cd $USER_HOME/tmt; tmt -c how=full run --id $USER_HOME/$RUN -v plans --name $plan $TESTS_CMD' $USER"
+            rlRun "su -l -c 'cd $USER_HOME/tmt; $COVERAGE_OPT \
+                tmt -c how=full run -vvv -ddd --id $USER_HOME/$RUN -v plans --name $plan $TESTS_CMD' $USER"
+
+            if [[ -n "$COVERAGE_OPT" ]]; then
+                rlRun "su -l -c 'coverage combine --rcfile=$RUN_COV_RC' $USER"
+                rlRun "su -l -c 'coverage html -d $USER_HOME/html-report/$RUN --rcfile=$RUN_COV_RC' $USER"
+                rlRun "su -l -c 'tar czf $USER_HOME/cov-$RUN.tgz $USER_HOME/html-report/$RUN' $USER"
+                rlFileSubmit "$USER_HOME/cov-$RUN.tgz"
+            fi
 
             # Upload file so one can review ASAP
             rlRun "tar czf /tmp/$RUN.tgz $USER_HOME/$RUN"
@@ -139,6 +205,17 @@ rlJournalStart
     done
 
     rlPhaseStartCleanup
+        if [[ $COVERAGE -eq 1 ]]; then
+            # Combine all coverage data
+            rlRun "su -l -c 'coverage combine --rcfile=$USER_COVERAGERC $USER_COVER_DIR/*' $USER"
+            rlRun "su -l -c 'coverage report --rcfile=$USER_COVERAGERC' $USER"
+            rlRun "su -l -c 'coverage html -d $USER_HOME/html-report/combined --rcfile=$USER_COVERAGERC' $USER"
+
+            rlFileSubmit $USER_COVER_FINAL
+            rlRun "su -l -c 'tar czf $USER_HOME/coverage-html.tgz $USER_HOME/html-report/combined' $USER"
+            rlFileSubmit $USER_HOME/coverage-html.tgz
+        fi
+
         rlRun "su -l -c 'tmt run --id $CONNECT_RUN plans --default finish' $USER"
         rlFileRestore
         rlRun "pkill -u $USER" 0,1
