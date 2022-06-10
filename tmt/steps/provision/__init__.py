@@ -276,8 +276,8 @@ class Guest(tmt.utils.Common):
     # Used by save() to construct the correct container for keys.
     _data_class = GuestData
 
-    role: Optional[str] = None
-    guest: Optional[str] = None
+    role: Optional[str]
+    guest: Optional[str]
 
     # TODO: do we need this list? Can whatever code is using it use _data_class directly?
     # List of supported keys
@@ -592,8 +592,6 @@ class GuestSshData(GuestData):
     reached over SSH.
     """
 
-    # hostname or ip address
-    guest: Optional[str] = None
     # port to connect to
     port: Optional[int] = None
     # user name to log in
