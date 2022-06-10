@@ -9,15 +9,30 @@ try:
 
 # Show detailed output upon command execution errors
 except tmt.utils.RunError as error:
+    # Check verbosity level used during raising exception,
+    # Supported way to correctly get verbosity is
+    # tmt.util.Common.opt('verbose')
+    verbose = 0
+    tb = error.__traceback__
+    while tb:
+        self = tb.tb_frame.f_locals.get('self', None)
+        if isinstance(self, tmt.utils.Common):
+            verbose = self.opt('verbose')
+        tb = tb.tb_next
     for name, output in (('stdout', error.stdout), ('stderr', error.stderr)):
         if not output:
             continue
         lines = output.strip().split('\n')
-        displayed = min(len(lines), tmt.utils.OUTPUT_LINES)
+        if verbose > 0:
+            displayed = f"{len(lines)}"
+            to_display = lines
+        else:
+            displayed = f"{min(len(lines), tmt.utils.OUTPUT_LINES)}/{len(lines)}"
+            to_display = lines[-tmt.utils.OUTPUT_LINES:]
         print(
-            f"\n{name} ({displayed}/{len(lines)} lines)"
+            f"\n{name} ({displayed} lines)"
             f"\n{tmt.utils.OUTPUT_WIDTH * '~'}\n" +
-            '\n'.join(lines[-tmt.utils.OUTPUT_LINES:]))
+            '\n'.join(to_display))
     print()
     click.echo(click.style(error.message, fg='red'), err=True)
     raise SystemExit(2)
