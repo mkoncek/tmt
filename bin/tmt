@@ -12,13 +12,10 @@ except tmt.utils.RunError as error:
     # Check verbosity level used during raising exception,
     # Supported way to correctly get verbosity is
     # tmt.util.Common.opt('verbose')
-    verbose = 0
-    tb = error.__traceback__
-    while tb:
-        self = tb.tb_frame.f_locals.get('self', None)
-        if isinstance(self, tmt.utils.Common):
-            verbose = self.opt('verbose')
-        tb = tb.tb_next
+    if isinstance(error.caller, tmt.util.Common):
+        verbose = error.caller.opt('verbose')
+    else:
+        verbose = 0
     for name, output in (('stdout', error.stdout), ('stderr', error.stderr)):
         if not output:
             continue

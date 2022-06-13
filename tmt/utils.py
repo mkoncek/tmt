@@ -525,7 +525,10 @@ class Common(object):
                 stderr=subprocess.STDOUT if join else subprocess.PIPE)
         except FileNotFoundError as error:
             raise RunError(
-                f"File '{error.filename}' not found.", command, 127)
+                f"File '{error.filename}' not found.",
+                command,
+                127,
+                caller=self)
 
         stdout_thread = StreamLogger(
             process.stdout, log_header='out', logger=log)
@@ -552,7 +555,8 @@ class Common(object):
                 command=command,
                 returncode=process.returncode,
                 stdout=stdout_thread.get_output(),
-                stderr=stderr_thread.get_output())
+                stderr=stderr_thread.get_output(),
+                caller=self)
         if join:
             return CommandOutput(
                 stdout_thread.get_output(), None)
@@ -611,7 +615,7 @@ class Common(object):
             message += f" Reason: {error.message}"
             raise RunError(
                 message, error.command, error.returncode,
-                error.stdout, error.stderr)
+                error.stdout, error.stderr, caller=self)
 
     def read(self, path: str, level: int = 2) -> str:
         """ Read a file from the workdir """
@@ -762,6 +766,9 @@ class RunError(GeneralError):
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
+        # Store instance of caller to get additional details
+        # in post processing (e.g. verbose level)
+        self.caller = kwargs.get('caller')
 
 
 class MetadataError(GeneralError):
