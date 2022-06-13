@@ -6,6 +6,19 @@ description: |
     Schedule a job using workflow-tomorrow:
     tmt test export --fmf-id | wow fedora-35 x86_64 --fmf-id -
 
+    Following environment variables are recognized:
+
+    REPO - url to git repository to clone,
+           defaults to github.com/teemtee/tmt
+    BRANCH - branch, commit or tag to checkout,
+             defaults to REPO's default branch
+    PRE_RELEASE - when '1' tests keeps version and release
+                  of the spec, otherwise 9.9.9.9 is used
+    PLANS - space separated names of plans to execute,
+            when not set all enabled plans are run
+    TEST_CMD - when not empty it is placed as is after
+               `tests` subcommand (e.g. "-n /tests/unit")
+
 test: ./test.sh
 framework: beakerlib
 adjust:

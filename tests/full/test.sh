@@ -7,12 +7,17 @@ USER_HOME="/home/$USER"
 
 CONNECT_RUN="/tmp/CONNECT"
 
+# Git repository with tmt code (origin or fork or own...)
+REPO="${REPO:-https://github.com/teemtee/tmt}"
+# Branch to checkout (or commit, tag)
 BRANCH="${BRANCH:-}"
 # Set following to 1 if you are running pre-relase
 PRE_RELEASE="${PRE_RELEASE:-0}"
 
-# Set to `test <options>` for test filtering
-TEST_CMD="${TEST_CMD:-}"
+# List of plans to execute (space separated)
+PLANS="${PLANS:-}"
+# Set options for `tests` subcommand
+TESTS_CMD="${TESTS_CMD:-}"
 
 set -o pipefail
 
@@ -54,11 +59,12 @@ rlJournalStart
         test -d /var/tmp/tmt && rlRun "chown $USER:$USER /var/tmp/tmt"
 
         # Clone repo
-        rlRun "git clone https://github.com/teemtee/tmt $USER_HOME/tmt"
+        rlRun "git clone $REPO $USER_HOME/tmt"
         rlRun "pushd $USER_HOME/tmt"
         [ -n "$BRANCH" ] && rlRun "git checkout --force '$BRANCH'"
         # Make current commit visible in the log
         rlRun "git show -s | cat"
+
         # Do not "patch" version for pre-release...
         [[ $PRE_RELEASE -ne 1 ]] && rlRun "sed 's/^Version:.*/Version: 9.9.9/' -i tmt.spec"
 
@@ -113,13 +119,18 @@ rlJournalStart
             rlRun "su -l -c 'cd $USER_HOME/tmt; tmt -c how=full plans ls --filter=enabled:true > $USER_HOME/enabled_plans' $USER"
             PLANS="$(echo $(cat $USER_HOME/enabled_plans))"
         fi
+
+        # Prepend 'tests' to the TESTS_CMD
+        if [ -n "$TESTS_CMD" ]; then
+          TESTS_CMD="tests $TESTS_CMD"
+        fi
     rlPhaseEnd
 
     for plan in $PLANS; do
         rlPhaseStartTest "Test: $plan"
             RUN="run$(echo $plan | tr '/' '-')"
             # Core of the test runs as $USER, -l should clear all BEAKER_envs.
-            rlRun "su -l -c 'cd $USER_HOME/tmt; tmt -c how=full run --id $USER_HOME/$RUN -v plans --name $plan $TEST_CMD' $USER"
+            rlRun "su -l -c 'cd $USER_HOME/tmt; tmt -c how=full run --id $USER_HOME/$RUN -v plans --name $plan $TESTS_CMD' $USER"
 
             # Upload file so one can review ASAP
             rlRun "tar czf /tmp/$RUN.tgz $USER_HOME/$RUN"
