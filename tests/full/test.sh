@@ -92,6 +92,14 @@ rlJournalStart
 
         if [[ $SKIP_INSTALL -eq 1 ]]; then
             rlLog "Skipping tmt build and install, tmt on the system is \$(rpm -q tmt)"
+            # this plan has 'install' when how == full and we have nothing to install
+            # easier to create plan from scratch than to delete 'adjust' rule
+            cat <<EOF > plans/main.fmf
+provision:
+  how: local
+execute:
+  how: tmt
+EOF
         else
             # Build tmt packages
             rlRun "dnf builddep -y tmt.spec" 0 "Install build dependencies"
