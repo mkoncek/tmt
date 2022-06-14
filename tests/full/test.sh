@@ -187,7 +187,7 @@ EOF
 
             # /plan/install exercise rpm/pip - tmt might be executed in nested vm/container...
             # safer to skip coverage generation instead of trying to make it work
-            if [[ $COVERAGE -eq 1 ]] && ! [[ "$plan" =~ /plans/install ]]; then
+            if [[ $COVERAGE -eq 1 ]] && ! [[ "$plan" =~ /plans/(install|sanity/lint|provision/(virtual|connect)) ]]; then
                 # Separate coverage per run
                 RUN_COV_RC=$USER_HOME/$RUN.coveragerc
                 # keep semicolon at the end
