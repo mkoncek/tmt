@@ -8,14 +8,21 @@ import pprint
 import re
 import subprocess
 from io import open
+from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 import fmf.utils
+# Used only for typing
 from click import echo, style
+from nitrate import TestCase
 
+import tmt.export
 import tmt.utils
 from tmt.utils import ConvertError
 
 log = fmf.utils.Logging('tmt').logger
+
+# It is not possible to use TypedDict here, because all keys are unknown
+DataType = Dict[str, Any]
 
 
 # Test case relevancy regular expressions
@@ -39,7 +46,11 @@ SYSTEM_JIRA = 2
 #  Convert
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-def read_manual(plan_id, case_id, disabled, with_script):
+def read_manual(
+        plan_id: int,
+        case_id: int,
+        disabled: bool,
+        with_script: bool) -> None:
     """
     Reads metadata of manual test cases from Nitrate
     """
@@ -107,7 +118,7 @@ def read_manual(plan_id, case_id, disabled, with_script):
     os.chdir(old_cwd)
 
 
-def read_manual_data(testcase):
+def read_manual_data(testcase: TestCase) -> Dict[str, str]:
     """ Read test data from manual fields """
     md_content = {}
     md_content['setup'] = html_to_markdown(testcase.setup)
@@ -117,7 +128,7 @@ def read_manual_data(testcase):
     return md_content
 
 
-def html_to_markdown(html):
+def html_to_markdown(html: str) -> str:
     """ Convert html to markdown """
     try:
         import html2text
@@ -129,10 +140,11 @@ def html_to_markdown(html):
         markdown = ""
     else:
         markdown = md_handler.handle(html).strip()
+    assert isinstance(markdown, str)
     return markdown
 
 
-def write_markdown(path, content):
+def write_markdown(path: str, content: Dict[str, str]) -> None:
     """ Write gathered metadata in the markdown format """
     to_print = ""
     if content['setup']:
@@ -155,7 +167,8 @@ def write_markdown(path, content):
         raise ConvertError(f"Unable to write '{path}'.")
 
 
-def add_bug(bug, data, system=SYSTEM_BUGZILLA):
+def add_bug(bug: int, data: DataType,
+            system: int = SYSTEM_BUGZILLA) -> None:
     """ Add relevant bug into data under the 'link' key """
     if system == SYSTEM_BUGZILLA:
         new_link = dict(relates=f"{BUGZILLA_URL}{bug}")
@@ -172,13 +185,19 @@ def add_bug(bug, data, system=SYSTEM_BUGZILLA):
     echo(style('relates: ', fg='green') + new_link['relates'])
 
 
-def read_datafile(path, filename, datafile, types, testinfo=None):
+def read_datafile(
+        path: str,
+        filename: str,
+        datafile: str,
+        types: List[str],
+        testinfo: Optional[str] = None
+        ) -> Tuple[str, DataType]:
     """
     Read data values from supplied Makefile or metadata file.
     Returns task name and a dictionary of the collected values.
     """
 
-    data = dict()
+    data: DataType = dict()
     if filename == 'Makefile':
         regex_task = r'Name:\s*(.*)\n'
         regex_summary = r'^Description:\s*(.*)\n'
@@ -200,30 +219,31 @@ def read_datafile(path, filename, datafile, types, testinfo=None):
 
     if testinfo is None:
         testinfo = datafile
+
     # Beaker task name
-    try:
-        beaker_task = re.search(regex_task, testinfo).group(1)
-        echo(style('task: ', fg='green') + beaker_task)
-        data['extra-task'] = beaker_task
-        data['extra-summary'] = beaker_task
-    except AttributeError:
+    search_result = re.search(regex_task, testinfo)
+    if search_result is None:
         raise ConvertError("Unable to parse 'Name' from testinfo.desc.")
+    beaker_task = search_result.group(1)
+    echo(style('task: ', fg='green') + beaker_task)
+    data['extra-task'] = beaker_task
+    data['extra-summary'] = beaker_task
+
     # Summary
-    try:
-        data['summary'] = re.search(
-            regex_summary, testinfo, re.M).group(1)
+    search_result = re.search(regex_summary, testinfo, re.M)
+    if search_result is not None:
+        data['summary'] = search_result.group(1)
         echo(style('summary: ', fg='green') + data['summary'])
-    except AttributeError:
-        pass
+
     # Test script
-    try:
-        data['test'] = re.search(
-            regex_test, datafile, re.M).group(1)
-        if filename == 'metadata':
-            data['test'] = data['test'].split()[-1]
-        echo(style('test: ', fg='green') + data['test'])
-    except AttributeError:
+    search_result = re.search(regex_test, datafile, re.M)
+    if search_result is None:
         raise ConvertError("Makefile is missing the 'run' target.")
+    data['test'] = search_result.group(1)
+    if filename == 'metadata':
+        data['test'] = data['test'].split()[-1]
+    echo(style('test: ', fg='green') + data['test'])
+
     # Detect framework
     try:
         test_path = os.path.join(path, data["test"])
@@ -235,31 +255,26 @@ def read_datafile(path, filename, datafile, types, testinfo=None):
         echo(style("framework: ", fg="green") + data["framework"])
     except IOError:
         raise ConvertError("Unable to open '{0}'.".format(test_path))
+
     # Contact
-    try:
-        data['contact'] = re.search(
-            regex_contact, testinfo, re.M).group(1)
+    search_result = re.search(regex_contact, testinfo, re.M)
+    if search_result is not None:
+        data['contact'] = search_result.group(1)
         echo(style('contact: ', fg='green') + data['contact'])
-    except AttributeError:
-        pass
 
     if filename == 'Makefile':
         # Component
-        try:
-            data['component'] = re.search(
-                r'^RunFor:\s*(.*)', testinfo, re.M).group(1).split()
+        search_result = re.search(r'^RunFor:\s*(.*)', testinfo, re.M)
+        if search_result is not None:
+            data['component'] = search_result.group(1).split()
             echo(style('component: ', fg='green') +
                  ' '.join(data['component']))
-        except AttributeError:
-            pass
 
     # Duration
-    try:
-        data['duration'] = re.search(
-            regex_duration, testinfo, re.M).group(1)
+    search_result = re.search(regex_duration, testinfo, re.M)
+    if search_result is not None:
+        data['duration'] = search_result.group(1)
         echo(style('duration: ', fg='green') + data['duration'])
-    except AttributeError:
-        pass
 
     if filename == 'Makefile':
         # Environment
@@ -291,9 +306,9 @@ def read_datafile(path, filename, datafile, types, testinfo=None):
 
     if filename == 'Makefile':
         # Convert Type into tags
-        try:
-            makefile_type = re.search(
-                r'^Type:\s*(.*)', testinfo, re.M).group(1)
+        search_result = re.search(r'^Type:\s*(.*)', testinfo, re.M)
+        if search_result is not None:
+            makefile_type = search_result.group(1)
             if 'all' in [type_.lower() for type_ in types]:
                 tags = makefile_type.split()
             else:
@@ -302,8 +317,6 @@ def read_datafile(path, filename, datafile, types, testinfo=None):
             if tags:
                 echo(style("tag: ", fg="green") + " ".join(tags))
                 data["tag"] = tags
-        except AttributeError:
-            pass
         # Add relevant bugs to the 'link' attribute
         for bug_line in re.findall(r'^Bug:\s*([0-9\s]+)', testinfo, re.M):
             for bug in re.findall(r'(\d+)', bug_line):
@@ -312,8 +325,19 @@ def read_datafile(path, filename, datafile, types, testinfo=None):
     return beaker_task, data
 
 
+ReadOutputType = Tuple[DataType, List[DataType]]
+
+
 def read(
-        path, makefile, restraint, nitrate, purpose, disabled, types, general):
+        path: str,
+        makefile: bool,
+        restraint: bool,
+        nitrate: bool,
+        purpose: bool,
+        disabled: bool,
+        types: List[str],
+        general: bool
+        ) -> ReadOutputType:
     """
     Read old metadata from various sources
 
@@ -373,6 +397,7 @@ def read(
             restraint_file = True
             echo(style('Restraint ', fg='blue'), nl=False)
 
+    assert filename is not None
     # Open the datafile
     if restraint_file or makefile_file:
         datafile_path = os.path.join(path, filename)
@@ -388,8 +413,8 @@ def read(
     testinfo_path = os.path.join(path, 'testinfo.desc')
     if os.path.isfile(testinfo_path):
         try:
-            with open(testinfo_path, encoding='utf-8') as testinfo:
-                old_testinfo = testinfo.read()
+            with open(testinfo_path, encoding='utf-8') as testinfo_file:
+                old_testinfo = testinfo_file.read()
                 os.remove(testinfo_path)
         except IOError:
             raise ConvertError(
@@ -439,14 +464,14 @@ def read(
             read_datafile(path, filename, datafile, types, testinfo)
 
         # Warn if makefile has extra lines in run and build targets
-        def target_content(target):
+        def target_content(target: str) -> List[str]:
             """ Extract lines from the target content """
             regexp = rf"^{target}:.*\n((?:\t[^\n]*\n?)*)"
-            try:
-                target = re.search(regexp, datafile, re.M).group(1)
-            except AttributeError:
+            search_result = re.search(regexp, datafile, re.M)
+            if search_result is None:
                 # Target not found in the Makefile
                 return []
+            target = search_result.group(1)
             return [line.strip('\t') for line in target.splitlines()]
 
         run_target_list = target_content("run")
@@ -469,8 +494,8 @@ def read(
         # Restore the original testinfo.desc content (if existed)
         if old_testinfo:
             try:
-                with open(testinfo_path, 'w', encoding='utf-8') as testinfo:
-                    testinfo.write(old_testinfo)
+                with open(testinfo_path, 'w', encoding='utf-8') as testinfo_file:
+                    testinfo_file.write(old_testinfo)
             except IOError:
                 raise ConvertError(
                     "Unable to write '{0}'.".format(testinfo_path))
@@ -483,8 +508,8 @@ def read(
         echo(style('Purpose ', fg='blue'), nl=False)
         purpose_path = os.path.join(path, 'PURPOSE')
         try:
-            with open(purpose_path, encoding='utf-8') as purpose:
-                content = purpose.read()
+            with open(purpose_path, encoding='utf-8') as purpose_file:
+                content = purpose_file.read()
             echo("found in '{0}'.".format(purpose_path))
             for header in ['PURPOSE', 'Description', 'Author']:
                 content = re.sub('^{0}.*\n'.format(header), '', content)
@@ -517,7 +542,12 @@ def read(
     return common_data, individual_data
 
 
-def read_nitrate(beaker_task, common_data, disabled, general):
+def read_nitrate(
+        beaker_task: str,
+        common_data: DataType,
+        disabled: bool,
+        general: bool
+        ) -> ReadOutputType:
     """ Read old metadata from nitrate test cases """
 
     # Need to import nitrate only when really needed. Otherwise we get
@@ -656,9 +686,13 @@ def extract_relevancy(notes, field):
     return relevancy.strip()
 
 
-def read_nitrate_case(testcase, makefile_data=None, general=False):
+def read_nitrate_case(
+        testcase: TestCase,
+        makefile_data: Optional[DataType] = None,
+        general: bool = False
+        ) -> DataType:
     """ Read old metadata from nitrate test case """
-    data = {'tag': []}
+    data: DataType = {'tag': []}
     echo("test case found '{0}'.".format(testcase.identifier))
     # Test identifier
     data['extra-nitrate'] = testcase.identifier
@@ -673,13 +707,13 @@ def read_nitrate_case(testcase, makefile_data=None, general=False):
             data['contact'] = '{} <{}>'.format(
                 testcase.tester.name, testcase.tester.email)
         else:
-            try:
-                # Use contact from Makefile if it's there and email matches
-                if re.search(testcase.tester.email, makefile_data['contact']):
-                    data['contact'] = makefile_data['contact']
-                else:
-                    raise KeyError
-            except (KeyError, TypeError):
+            if makefile_data is None:
+                # Otherwise use just the email address
+                data['contact'] = testcase.tester.email
+            # Use contact from Makefile if it's there and email matches
+            elif re.search(testcase.tester.email, makefile_data['contact']):
+                data['contact'] = makefile_data['contact']
+            else:
                 # Otherwise use just the email address
                 data['contact'] = testcase.tester.email
         echo(style('contact: ', fg='green') + data['contact'])
@@ -754,7 +788,8 @@ def read_nitrate_case(testcase, makefile_data=None, general=False):
 
     # Extend bugs detected from Makefile with those linked in Nitrate
     try:
-        data['link'] = makefile_data['link'].copy()
+        if makefile_data is not None:
+            data['link'] = makefile_data['link'].copy()
     except (KeyError, TypeError):
         pass
     for bug in testcase.bugs:
@@ -785,7 +820,7 @@ def read_nitrate_case(testcase, makefile_data=None, general=False):
     return data
 
 
-def adjust_runtest(path):
+def adjust_runtest(path: str) -> None:
     """ Adjust runtest.sh content and permission """
 
     # Nothing to do if there is no runtest.sh
@@ -826,7 +861,7 @@ def adjust_runtest(path):
             "Could not make '{0}' executable.".format(path))
 
 
-def write(path, data):
+def write(path: str, data: DataType) -> None:
     """ Write gathered metadata in the fmf format """
     # Put keys into a reasonable order
     extra_keys = [
@@ -849,7 +884,8 @@ def write(path, data):
         "Metadata successfully stored into '{0}'.".format(path), fg='magenta'))
 
 
-def relevancy_to_adjust(relevancy):
+def relevancy_to_adjust(
+        relevancy: Union[str, List[str]]) -> List[DataType]:
     """
     Convert the old test case relevancy into adjust rules
 
@@ -863,21 +899,20 @@ def relevancy_to_adjust(relevancy):
 
     for line in re.split(r'\s*\n\s*', relevancy.strip()):
         # Extract possible comments
-        try:
-            line, rule['because'] = re.search(RELEVANCY_COMMENT, line).groups()
-        except Exception:
-            pass
+        search_result = re.search(RELEVANCY_COMMENT, line)
+        if search_result is not None:
+            line, rule['because'] = search_result.groups()
 
         # Nothing to do with empty lines
         if not line:
             continue
 
         # Split rule
-        try:
-            condition, decision = re.search(RELEVANCY_RULE, line).groups()
-        except Exception:
+        search_result = re.search(RELEVANCY_RULE, line)
+        if search_result is None:
             raise tmt.utils.ConvertError(
                 f"Invalid test case relevancy rule '{line}'.")
+        condition, decision = search_result.groups()
 
         # Handle the decision
         if decision.lower() == 'false':
@@ -892,12 +927,11 @@ def relevancy_to_adjust(relevancy):
         # Adjust condition syntax
         expressions = list()
         for expression in re.split(r'\s*&&?\s*', condition):
-            try:
-                left, operator, right = re.match(
-                    RELEVANCY_EXPRESSION, expression).groups()
-            except Exception:
+            search_result = re.search(RELEVANCY_EXPRESSION, expression)
+            if search_result is None:
                 raise tmt.utils.ConvertError(
                     f"Invalid test case relevancy expression '{expression}'.")
+            left, operator, right = search_result.groups()
             # Always use double == for equality comparison
             if operator == '=':
                 operator = '=='
