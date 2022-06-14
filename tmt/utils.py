@@ -24,6 +24,7 @@ from typing import (IO, TYPE_CHECKING, Any, BinaryIO, Dict, Generator,
 
 import click
 import fmf
+import jsonschema
 import pkg_resources
 import requests
 from click import echo, style, wrap_text
@@ -268,6 +269,20 @@ class Common(object):
     _context: Optional[click.Context] = None
     _options: Dict[str, Any] = dict()
     _workdir: WorkdirType = None
+
+    # TODO: must be declared outside of __init__(), because it must exist before
+    # __init__() gets called to allow logging helpers work correctly when used
+    # from mixins. But that's not very clean, is it? :( Maybe decoupling logging
+    # from Common class would help, such a class would be able to initialize
+    # itself without involving the rest of Common code. On the other hand,
+    # Common owns workdir, for example, whose value affects logging too, so no
+    # clear solution so far.
+    #
+    # Note: cannot use CommonDerivedType - it's a TypeVar filled in by the type
+    # given to __init__() and therefore the type it's representing *now* is
+    # unknown. but we know `parent` will be derived from `Common` class, so it's
+    # mostly fine.
+    parent: Optional['Common'] = None
 
     def __init__(
             self,
@@ -2228,3 +2243,29 @@ def load_schema_store() -> SchemaStore:
         raise FileError(f"Failed to discover schema files\n{exc}")
 
     return store
+
+
+def validate_fmf_node(
+        node: fmf.Tree, schema_name: str) -> List[Tuple[jsonschema.ValidationError, str]]:
+    """ Validate a given fmf node """
+
+    result = node.validate(
+        load_schema(schema_name),
+        schema_store=load_schema_store())
+
+    if result.result is True:
+        return []
+
+    # A bit of error formatting. It is possible to use str(error), but the result
+    # is a bit too JSON-ish. Let's present an error message in a way that helps
+    # users to point finger on each and every issue. But don't throw the original
+    # errors away!
+
+    errors: List[Tuple[jsonschema.ValidationError, str]] = []
+
+    for error in result.errors:
+        path = f'{node.name}:{".".join(error.path)}'
+
+        errors.append((error, f'{path} - {error.message}'))
+
+    return errors

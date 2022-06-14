@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import sys
 import time
-from typing import Optional
+from typing import List, Optional
 
 import click
 import fmf
@@ -72,6 +72,56 @@ class FmfIdType(TypedDict):
     ref: Optional[str]
     path: Optional[str]
     name: Optional[str]
+
+
+class ValidateFmfMixin:
+    """
+    Mixin adding validation of a fmf node.
+
+    Loads a schema whose name is derived from class name, and uses fmf's validate()
+    method to perform the validation.
+    """
+
+    def _validate_fmf_node(self, node: fmf.Tree) -> None:
+        """ Validate a given fmf node """
+
+        errors = tmt.utils.validate_fmf_node(
+            node, f'{self.__class__.__name__.lower()}s.yaml')
+
+        if not errors:
+            return
+
+        # Cannot use backslash inside f-string, but I want to join errors with a new-line
+        # character, hence this dummy helper variable.
+        NL = '\n'
+
+        message = f"""Failed to validate fmf node {node.name}
+
+{NL.join('* ' + error_message for _, error_message in errors)}
+"""
+
+        # TODO: how to proceed requires more context. At the beginning, log the
+        # error and continue - requires a logger, and with what level? - but
+        # later, validation would become mandatory and this would become an
+        # exception.
+        #
+        # Or will it? Wouldn't an option to ignore this kind of error useful?
+        # We'll see, in any case, more parameters will be needed.
+
+        # TODO: really, needs a fully functioning logger. But since we get called
+        # before classes like Common get their job done, many members of self
+        # might not be ready yet. See a note in Common WRT Common.parent :/
+        if hasattr(self, 'warn'):
+            self.warn(message, shift=1)
+
+        else:
+            print(message)
+
+    def __init__(self, node, *args, **kwargs) -> None:
+        # Validate *before* letting next class in line touch the data.
+        self._validate_fmf_node(node)
+
+        super().__init__(node, *args, **kwargs)
 
 
 class Core(tmt.utils.Common):
@@ -297,7 +347,7 @@ class Core(tmt.utils.Common):
 Node = Core
 
 
-class Test(Core):
+class Test(ValidateFmfMixin, Core):
     """ Test object (L1 Metadata) """
 
     # Supported attributes (listed in display order)
@@ -587,7 +637,7 @@ class Test(Core):
             return super().export(format_, keys)
 
 
-class Plan(Core):
+class Plan(ValidateFmfMixin, Core):
     """ Plan object (L2 Metadata) """
 
     extra_L2_keys = [
@@ -1036,7 +1086,7 @@ class Plan(Core):
                 f"Invalid plan export format '{format_}'.")
 
 
-class Story(Core):
+class Story(ValidateFmfMixin, Core):
     """ User story object """
 
     # Supported attributes (listed in display order)
