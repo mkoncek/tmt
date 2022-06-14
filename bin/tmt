@@ -12,7 +12,7 @@ except tmt.utils.RunError as error:
     # Check verbosity level used during raising exception,
     # Supported way to correctly get verbosity is
     # tmt.util.Common.opt('verbose')
-    if isinstance(error.caller, tmt.util.Common):
+    if isinstance(error.caller, tmt.utils.Common):
         verbose = error.caller.opt('verbose')
     else:
         verbose = 0
