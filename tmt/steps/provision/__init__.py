@@ -60,7 +60,6 @@ class Provision(tmt.steps.Step):
         """ Load guest data from the workdir """
         extra_keys = extra_keys or []
         super().load(extra_keys)
-
         try:
             raw_guest_data = tmt.utils.yaml_to_dict(self.read('guests.yaml'))
 
@@ -284,7 +283,7 @@ class Guest(tmt.utils.Common):
     # (used for import/export to/from attributes during load and save)
     @property
     def _keys(self) -> List[str]:
-        return list(self._data_class.iter_key_names())
+        return list(self._data_class.keys())
 
     def __init__(self, data: GuestData, name=None, parent=None):
         """ Initialize guest data """

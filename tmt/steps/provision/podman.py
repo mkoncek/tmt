@@ -84,7 +84,7 @@ class ProvisionPodman(tmt.steps.provision.ProvisionPlugin):
         # Prepare data for the guest instance
         data = PodmanGuestData(**{
             key: self.get(key)
-            for key in PodmanGuestData.iter_key_names()
+            for key in PodmanGuestData.keys()
             })
 
         # Create a new GuestTestcloud instance and start it

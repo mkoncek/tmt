@@ -266,7 +266,7 @@ class ProvisionTestcloud(tmt.steps.provision.ProvisionPlugin):
         # Give info about provided data
         data = TestcloudGuestData(**{
             key: self.get(key)
-            for key in TestcloudGuestData.iter_key_names()
+            for key in TestcloudGuestData.keys()
             })
         for key, value in data.to_dict().items():
             if key == 'memory':
