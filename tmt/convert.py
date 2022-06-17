@@ -8,12 +8,10 @@ import pprint
 import re
 import subprocess
 from io import open
-from typing import Any, Dict, List, Optional, Tuple, Union, cast
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union, cast
 
 import fmf.utils
-# Used only for typing
 from click import echo, style
-from nitrate import TestCase
 
 import tmt.export
 import tmt.utils
@@ -22,7 +20,10 @@ from tmt.utils import ConvertError
 log = fmf.utils.Logging('tmt').logger
 
 # It is not possible to use TypedDict here, because all keys are unknown
-DataType = Dict[str, Any]
+NitrateDataType = Dict[str, Any]
+
+if TYPE_CHECKING:
+    from nitrate import TestCase
 
 
 # Test case relevancy regular expressions
@@ -118,7 +119,7 @@ def read_manual(
     os.chdir(old_cwd)
 
 
-def read_manual_data(testcase: TestCase) -> Dict[str, str]:
+def read_manual_data(testcase: 'TestCase') -> Dict[str, str]:
     """ Read test data from manual fields """
     md_content = {}
     md_content['setup'] = html_to_markdown(testcase.setup)
@@ -139,8 +140,7 @@ def html_to_markdown(html: str) -> str:
     if html is None:
         markdown = ""
     else:
-        markdown = md_handler.handle(html).strip()
-    assert isinstance(markdown, str)
+        markdown = cast(str, md_handler.handle(html)).strip()
     return markdown
 
 
@@ -167,7 +167,7 @@ def write_markdown(path: str, content: Dict[str, str]) -> None:
         raise ConvertError(f"Unable to write '{path}'.")
 
 
-def add_bug(bug: int, data: DataType,
+def add_bug(bug: int, data: NitrateDataType,
             system: int = SYSTEM_BUGZILLA) -> None:
     """ Add relevant bug into data under the 'link' key """
     if system == SYSTEM_BUGZILLA:
@@ -191,13 +191,13 @@ def read_datafile(
         datafile: str,
         types: List[str],
         testinfo: Optional[str] = None
-        ) -> Tuple[str, DataType]:
+        ) -> Tuple[str, NitrateDataType]:
     """
     Read data values from supplied Makefile or metadata file.
     Returns task name and a dictionary of the collected values.
     """
 
-    data: DataType = dict()
+    data: NitrateDataType = dict()
     if filename == 'Makefile':
         regex_task = r'Name:\s*(.*)\n'
         regex_summary = r'^Description:\s*(.*)\n'
@@ -325,7 +325,7 @@ def read_datafile(
     return beaker_task, data
 
 
-ReadOutputType = Tuple[DataType, List[DataType]]
+ReadOutputType = Tuple[NitrateDataType, List[NitrateDataType]]
 
 
 def read(
@@ -544,7 +544,7 @@ def read(
 
 def read_nitrate(
         beaker_task: str,
-        common_data: DataType,
+        common_data: NitrateDataType,
         disabled: bool,
         general: bool
         ) -> ReadOutputType:
@@ -666,7 +666,9 @@ def read_nitrate(
     return common_data, individual_data
 
 
-def extract_relevancy(notes, field):
+def extract_relevancy(
+        notes: str,
+        field: tmt.utils.StructuredField) -> Optional[Union[str, List[str]]]:
     """ Get relevancy from testcase, respecting sf priority """
     try:
         if "relevancy" in field:
@@ -687,12 +689,12 @@ def extract_relevancy(notes, field):
 
 
 def read_nitrate_case(
-        testcase: TestCase,
-        makefile_data: Optional[DataType] = None,
+        testcase: 'TestCase',
+        makefile_data: Optional[NitrateDataType] = None,
         general: bool = False
-        ) -> DataType:
+        ) -> NitrateDataType:
     """ Read old metadata from nitrate test case """
-    data: DataType = {'tag': []}
+    data: NitrateDataType = {'tag': []}
     echo("test case found '{0}'.".format(testcase.identifier))
     # Test identifier
     data['extra-nitrate'] = testcase.identifier
@@ -861,7 +863,7 @@ def adjust_runtest(path: str) -> None:
             "Could not make '{0}' executable.".format(path))
 
 
-def write(path: str, data: DataType) -> None:
+def write(path: str, data: NitrateDataType) -> None:
     """ Write gathered metadata in the fmf format """
     # Put keys into a reasonable order
     extra_keys = [
@@ -885,7 +887,7 @@ def write(path: str, data: DataType) -> None:
 
 
 def relevancy_to_adjust(
-        relevancy: Union[str, List[str]]) -> List[DataType]:
+        relevancy: Union[str, List[str]]) -> List[NitrateDataType]:
     """
     Convert the old test case relevancy into adjust rules
 
