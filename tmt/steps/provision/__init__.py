@@ -23,6 +23,11 @@ CONNECTION_TIMEOUT = 60 * 60
 # Wait time when reboot happens in seconds
 RECONNECT_INITIAL_WAIT_TIME = 5
 
+# When waiting for guest to recover from reboot, try re-connecting every
+# this many seconds.
+RECONNECT_WAIT_TICK = 5
+RECONNECT_WAIT_TICK_INCREASE = 1.0
+
 # Default rsync options
 DEFAULT_RSYNC_OPTIONS = [
     "-R", "-r", "-z", "--links", "--safe-links", "--delete"]
@@ -473,7 +478,12 @@ class Guest(tmt.utils.Common):
 
         raise NotImplementedError()
 
-    def reconnect(self, timeout=CONNECTION_TIMEOUT):
+    def reconnect(
+            self,
+            timeout=CONNECTION_TIMEOUT,
+            tick=RECONNECT_WAIT_TICK,
+            tick_increase: float = RECONNECT_WAIT_TICK_INCREASE
+            ):
         """
         Ensure the connection to the guest is working after reboot
 
@@ -485,21 +495,26 @@ class Guest(tmt.utils.Common):
         time.sleep(RECONNECT_INITIAL_WAIT_TIME)
         self.debug("Wait for a connection to the guest.")
 
-        # A small shortcut... `now` or `utcnow`, should not matter, becase we
-        # need a difference between two values. As long as we use the same
-        # function for both sides of the equation, we should be fine.
-        now = datetime.datetime.utcnow
-        deadline = now() + datetime.timedelta(seconds=timeout)
-        while now() < deadline:
+        def try_whoami() -> None:
             try:
                 self.execute('whoami')
-                break
+
             except tmt.utils.RunError:
-                self.debug('Failed to connect to the guest, retrying.')
-                time.sleep(1)
-        else:
+                raise tmt.utils.WaitingIncomplete()
+
+        try:
+            tmt.utils.wait(
+                self,
+                try_whoami,
+                datetime.timedelta(
+                    seconds=timeout),
+                tick=tick,
+                tick_increase=tick_increase)
+
+        except tmt.utils.WaitingTimedOutError:
             self.debug("Connection to guest failed after reboot.")
             return False
+
         return True
 
     def remove(self):
