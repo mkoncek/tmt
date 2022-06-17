@@ -3,6 +3,7 @@
 
 import contextlib
 import datetime
+import functools
 import glob
 import io
 import os
@@ -23,6 +24,7 @@ from typing import (IO, TYPE_CHECKING, Any, BinaryIO, Dict, Generator,
 
 import click
 import fmf
+import pkg_resources
 import requests
 from click import echo, style, wrap_text
 from requests.adapters import HTTPAdapter
@@ -2163,3 +2165,66 @@ def find_fmf_root(path: str) -> List[str]:
         raise MetadataError(f"No fmf root present inside '{path}'.")
     fmf_roots.sort(key=lambda path: len(path))
     return fmf_roots
+
+
+#
+# JSON schema-based validation helpers
+#
+# Aims at FMF data consumed by TMT, but can be used for any structure.
+#
+
+# `Schema` represents a loaded JSON schema structure. It may be fairly complex,
+# but it's not needed to provide the exhaustive and fully -detailed type since
+# TMT code is not actually "reading" it. Loaded schema is passed down to
+# jsonschema library, and while `Any` would be perfectly valid, let's use a
+#  to make schema easier to track in our code.
+Schema = Dict[str, Any]
+SchemaStore = Dict[str, Schema]
+
+
+@functools.lru_cache(maxsize=None)
+def load_schema(schema_filepath: str) -> Schema:
+    """ Load a JSON schema from a given filepath """
+
+    if not os.path.isabs(schema_filepath):
+        schema_filepath = os.path.join(
+            pkg_resources.resource_filename(
+                'tmt', 'schemas'), schema_filepath)
+
+    try:
+        with open(schema_filepath, 'r', encoding='utf-8') as f:
+            return cast(Schema, yaml_to_dict(f.read()))
+
+    except OSError as exc:
+        raise FileError(f"Failed to load schema file {schema_filepath}\n{exc}")
+
+
+@functools.lru_cache(maxsize=None)
+def load_schema_store() -> SchemaStore:
+    """
+    Load all available JSON schemas, and put them into a "store".
+
+    Schema store is a simple mapping between schema IDs and schemas.
+    """
+
+    store: SchemaStore = {}
+
+    schema_dirpath = pkg_resources.resource_filename('tmt', 'schemas')
+
+    try:
+        for dirpath, dirnames, filenames in os.walk(
+                schema_dirpath, followlinks=True):
+            for filename in filenames:
+                # Ignore all files but YAML files.
+                if os.path.splitext(filename)[
+                        1].lower() not in ('.yaml', '.yml'):
+                    continue
+
+                schema = load_schema(os.path.join(dirpath, filename))
+
+                store[schema['$id']] = schema
+
+    except OSError as exc:
+        raise FileError(f"Failed to discover schema files\n{exc}")
+
+    return store
