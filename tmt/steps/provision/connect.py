@@ -1,9 +1,28 @@
+import sys
+from typing import Any, List, Optional
+
 import click
 
 import tmt
+import tmt.utils
+from tmt.steps.provision import Guest
+
+if sys.version_info >= (3, 8):
+    from typing import TypedDict
+else:
+    from typing_extensions import TypedDict
+
+StepDataType = TypedDict(
+    'StepDataType',
+    {
+        'playbook': List[str],
+        'playbooks': List[str]
+        }
+    )
 
 
-class ProvisionConnect(tmt.steps.provision.ProvisionPlugin):
+class ProvisionConnect(
+        tmt.steps.provision.ProvisionPlugin):  # type: ignore[misc]
     """
     Connect to a provisioned guest using ssh
 
@@ -41,7 +60,7 @@ class ProvisionConnect(tmt.steps.provision.ProvisionPlugin):
     _keys = ["guest", "key", "user", "password", "port"]
 
     @classmethod
-    def options(cls, how=None):
+    def options(cls, how: Optional[str] = None) -> Any:
         """ Prepare command line options for connect """
         return [
             click.option(
@@ -61,7 +80,7 @@ class ProvisionConnect(tmt.steps.provision.ProvisionPlugin):
                 help='Password for login into the guest system.'),
             ] + super().options(how)
 
-    def default(self, option, default=None):
+    def default(self, option: str, default: Optional[Any] = None) -> Any:
         """ Return default data for given option """
         # User root as the default user
         if option == 'user':
@@ -69,13 +88,14 @@ class ProvisionConnect(tmt.steps.provision.ProvisionPlugin):
         # No other defaults available
         return default
 
-    def wake(self, keys=None, data=None):
+    def wake(self, keys: Optional[List[str]] = None,
+             data: Optional[StepDataType] = None) -> None:
         """ Wake up the plugin, process data, apply options """
         super().wake(keys=keys, data=data)
         if data:
             self._guest = tmt.GuestSsh(data, name=self.name, parent=self.step)
 
-    def go(self):
+    def go(self) -> None:
         """ Prepare the connection """
         super().go()
 
@@ -111,6 +131,6 @@ class ProvisionConnect(tmt.steps.provision.ProvisionPlugin):
         # And finally create the guest
         self._guest = tmt.GuestSsh(data, name=self.name, parent=self.step)
 
-    def guest(self):
+    def guest(self) -> Guest:
         """ Return the provisioned guest """
         return self._guest
