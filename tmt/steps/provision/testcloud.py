@@ -587,7 +587,7 @@ class GuestTestcloud(tmt.GuestSsh):
                     f"Failed to remove testcloud instance: {error}")
             self.info('guest', 'removed', 'green')
 
-    def reboot(self, hard=False, command=None):
+    def reboot(self, hard=False, command=None, timeout=None):
         """ Reboot the guest, return True if successful """
         # Use custom reboot command if provided
         if command:
@@ -595,4 +595,4 @@ class GuestTestcloud(tmt.GuestSsh):
         if not self._instance:
             raise tmt.utils.ProvisionError("No instance initialized.")
         self._instance.reboot(soft=not hard)
-        return self.reconnect()
+        return self.reconnect(timeout=timeout)

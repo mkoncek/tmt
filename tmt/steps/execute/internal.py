@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import time
@@ -217,12 +218,17 @@ class ExecuteInternal(tmt.steps.execute.ExecutePlugin):
             self.debug(f"Reboot during test '{test}' "
                        f"with reboot count {test._reboot_count}.")
             with open(reboot_request_path, 'r') as reboot_file:
-                reboot_command = reboot_file.read().strip()
+                reboot_data = json.loads(reboot_file.read())
+            reboot_command = reboot_data.get('command')
+            try:
+                timeout = int(reboot_data.get('timeout'))
+            except ValueError:
+                timeout = None
             # Reset the file
             os.remove(reboot_request_path)
             guest.push(test_data)
             try:
-                guest.reboot(command=reboot_command)
+                guest.reboot(command=reboot_command, timeout=timeout)
             except tmt.utils.RunError:
                 self.fail(
                     f"Failed to reboot guest using the "
@@ -232,7 +238,7 @@ class ExecuteInternal(tmt.steps.execute.ExecutePlugin):
                 self.warn(
                     "Guest does not support soft reboot, "
                     "trying hard reboot.")
-                guest.reboot(hard=True)
+                guest.reboot(hard=True, timeout=timeout)
             return True
         return False
 
