@@ -80,7 +80,7 @@ class Step(tmt.utils.Common):
     def __init__(
             self,
             plan: 'Plan',
-            data: Optional[StepData] = None,
+            data: Optional[Union[StepData, List[StepData]]] = None,
             name: Optional[str] = None,
             workdir: tmt.utils.WorkdirArgumentType = None) -> None:
         """ Initialize and check the step data """
@@ -402,7 +402,7 @@ class Plugin(Phase, metaclass=PluginIndex):
         self.step = step
 
     @classmethod
-    def base_command(cls, method_class: Optional[Method] = None,
+    def base_command(cls, method_class: Optional[Type[click.Command]] = None,
                      usage: Optional[str] = None) -> click.Command:
         """ Create base click command (common for all step plugins) """
         raise NotImplementedError
@@ -432,7 +432,7 @@ class Plugin(Phase, metaclass=PluginIndex):
             commands[method.name] = command
 
         # Create base command with common options using method class
-        method_class: Method = tmt.options.create_method_class(commands)
+        method_class: Type[click.Command] = tmt.options.create_method_class(commands)
         command = cls.base_command(
             method_class, usage=method_overview)
         # Apply common options

@@ -1,10 +1,18 @@
 import collections
 import copy
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type, cast
 
 import click
 import fmf
 
 import tmt
+
+if TYPE_CHECKING:
+    from tmt.base import Plan
+    from tmt.steps import Method, StepData
+    from tmt.steps.provision import Guest
+
+PrepareDataType = List[StepData]
 
 
 class Prepare(tmt.steps.Step):
@@ -17,17 +25,19 @@ class Prepare(tmt.steps.Step):
     recommended packages it is '75'.
     """
 
-    def __init__(self, plan, data):
+    def __init__(self, plan: 'Plan', data: PrepareDataType) -> None:
         """ Initialize prepare step data """
         super().__init__(plan=plan, data=data)
         self.preparations_applied = 0
 
-    def wake(self):
+    def wake(self) -> None:
         """ Wake up the step (process workdir and command line) """
         super().wake()
 
         # Choose the right plugin and wake it up
         for data in self.data:
+            if not isinstance(data, list):
+                raise tmt.utils.GeneralError('data should be a dict')
             plugin = PreparePlugin.delegate(self, data)
             plugin.wake()
             # Add plugin only if there are data
@@ -43,18 +53,20 @@ class Prepare(tmt.steps.Step):
             self.status('todo')
             self.save()
 
-    def show(self):
+    def show(self) -> None:
         """ Show discover details """
         for data in self.data:
+            if not isinstance(data, list):
+                raise tmt.utils.GeneralError('data should be a dict')
             PreparePlugin.delegate(self, data).show()
 
-    def summary(self):
+    def summary(self) -> None:
         """ Give a concise summary of the preparation """
         preparations = fmf.utils.listed(
             self.preparations_applied, 'preparation')
         self.info('summary', f'{preparations} applied', 'green', shift=1)
 
-    def _prepare_roles(self):
+    def _prepare_roles(self) -> collections.defaultdict[str, List[str]]:
         """ Create a mapping of roles to guest names """
         role_mapping = collections.defaultdict(list)
         for guest in self.plan.provision.guests():
@@ -62,7 +74,7 @@ class Prepare(tmt.steps.Step):
                 role_mapping[guest.role].append(guest.name)
         return role_mapping
 
-    def _prepare_hosts(self):
+    def _prepare_hosts(self) -> Dict[str, str]:
         """ Create a mapping of guest names to IP addresses """
         host_mapping = {}
         for guest in self.plan.provision.guests():
@@ -72,7 +84,7 @@ class Prepare(tmt.steps.Step):
                 host_mapping[guest.name] = guest.guest
         return host_mapping
 
-    def go(self):
+    def go(self) -> None:
         """ Prepare the guests """
         super().go()
 
@@ -150,7 +162,7 @@ class Prepare(tmt.steps.Step):
         self.status('done')
         self.save()
 
-    def requires(self):
+    def requires(self) -> List[str]:
         """
         Packages required by all enabled prepare plugins
 
@@ -168,13 +180,17 @@ class PreparePlugin(tmt.steps.Plugin):
     """ Common parent of prepare plugins """
 
     # List of all supported methods aggregated from all plugins
-    _supported_methods = []
+    _supported_methods: List['Method'] = []
 
     # Common keys for all prepare step implementations
     _common_keys = ['where']
 
     @classmethod
-    def base_command(cls, method_class=None, usage=None):
+    def base_command(
+        cls,
+        method_class: Optional[Type[click.Command]] = None,
+        usage: Optional[str] = None
+            ) -> click.Command:
         """ Create base click command (common for all prepare plugins) """
 
         # Prepare general usage message for the step
@@ -187,13 +203,13 @@ class PreparePlugin(tmt.steps.Plugin):
         @click.option(
             '-h', '--how', metavar='METHOD',
             help='Use specified method for environment preparation.')
-        def prepare(context, **kwargs):
+        def prepare(context: click.Context, **kwargs: Any) -> None:
             context.obj.steps.add('prepare')
             Prepare._save_context(context)
 
         return prepare
 
-    def go(self, guest):
+    def go(self, guest: 'Guest') -> None:
         """ Prepare the guest (common actions) """
         super().go()
 
