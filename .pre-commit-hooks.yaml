@@ -1,0 +1,7 @@
+-   id: tmt-test-lint
+    name: tmt tests lint
+    entry: tmt tests lint
+    files: '.*\.fmf'
+    pass_filenames: false
+    language: python
+    language_version: python3
