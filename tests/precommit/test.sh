@@ -27,14 +27,15 @@ EOF
         rlRun -s "pre-commit install"
         rlAssertGrep 'pre-commit installed' $rlRun_LOG
         rlRun -s "git add .pre-commit-config.yaml"
-        # FIXME why this doesn't die with missing tmt init??? .fmf is not stagged
-        #rlRun -s "pre-commit try-repo $REPO"
-        rlRun -s "git commit -m 'first'"
+        rlRun -s "git commit -m nothing_to_check"
         rlAssertGrep 'tmt tests lint.*no files to check' $rlRun_LOG
-
         rlRun "echo 'test: echo' > main.fmf"
         rlRun "git add main.fmf"
-        rlRun -s "git commit -m 'second'"
+        rlRun -s "git commit -m 'missing_fmf'" "1"
+        rlAssertGrep 'tmt tests lint.*Failed' $rlRun_LOG
+
+        rlRun "git add .fmf/version"
+        rlRun -s "git commit -m 'pass'"
         rlAssertGrep 'tmt tests lint.*Passed' $rlRun_LOG
 
         rlRun "echo foo: bar >> main.fmf"
