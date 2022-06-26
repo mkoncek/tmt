@@ -3,7 +3,7 @@ import tmt.steps.finish
 from tmt.steps.prepare.ansible import PrepareAnsible
 
 
-class FinishAnsible(tmt.steps.finish.FinishPlugin, PrepareAnsible):
+class FinishAnsible(tmt.steps.finish.FinishPlugin, PrepareAnsible):  # type: ignore[misc]
     """
     Perform finishing tasks using ansible
 
