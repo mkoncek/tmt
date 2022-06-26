@@ -5,9 +5,10 @@ import click
 import fmf
 
 import tmt
+from tmt.steps import Step
 
 
-class Finish(tmt.steps.Step):
+class Finish(Step):
     """
     Perform the finishing tasks and clean up provisioned guests.
 
@@ -20,7 +21,7 @@ class Finish(tmt.steps.Step):
     successful) so that provisioned systems are not kept running.
     """
 
-    def wake(self):
+    def wake(self) -> None:
         """ Wake up the step (process workdir and command line) """
         super().wake()
 
@@ -41,17 +42,17 @@ class Finish(tmt.steps.Step):
             self.status('todo')
             self.save()
 
-    def show(self):
+    def show(self) -> None:
         """ Show finish details """
         for data in self.data:
             FinishPlugin.delegate(self, data).show()
 
-    def summary(self):
+    def summary(self) -> None:
         """ Give a concise summary """
         tasks = fmf.utils.listed(self.phases(), 'task')
         self.info('summary', f'{tasks} completed', 'green', shift=1)
 
-    def go(self):
+    def go(self) -> None:
         """ Execute finishing tasks """
         super().go()
 
@@ -86,7 +87,7 @@ class Finish(tmt.steps.Step):
         self.status('done')
         self.save()
 
-    def requires(self):
+    def requires(self) -> List[str]:
         """
         Packages required by all enabled finish plugins
 
