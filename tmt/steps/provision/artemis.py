@@ -7,6 +7,7 @@ import click
 import requests
 
 import tmt
+import tmt.hardware
 import tmt.steps.provision
 from tmt.utils import ProvisionError, retry_session, updatable_message
 
@@ -520,7 +521,9 @@ class GuestArtemis(tmt.GuestSsh):  # type: ignore[misc]
             environment['pool'] = self.pool
 
         if self.hardware is not None:
-            assert isinstance(self.hardware, dict)
+            # If requirements pass the test of parsing, they are probably valid rather
+            # than invalid...
+            _ = tmt.hardware.parse_hw_requirements(self.hardware)
 
             environment['hw']['constraints'] = self.hardware
 

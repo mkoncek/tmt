@@ -42,6 +42,7 @@ __scripts__ = ['bin/tmt']
 install_requires = [
     'fmf>=1.1.0',
     'click',
+    'pint',
     'requests',
     'ruamel.yaml',
 ]
