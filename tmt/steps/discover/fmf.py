@@ -11,8 +11,10 @@ import tmt
 import tmt.beakerlib
 import tmt.steps.discover
 
+from typing import Any, List, Optional
+from tmt.base import Test
 
-class DiscoverFmf(tmt.steps.discover.DiscoverPlugin):
+class DiscoverFmf(tmt.steps.discover.DiscoverPlugin):  # type: ignore[misc]
     """
     Discover available tests from fmf metadata
 
@@ -118,7 +120,7 @@ class DiscoverFmf(tmt.steps.discover.DiscoverPlugin):
         )
 
     @classmethod
-    def options(cls, how=None):
+    def options(cls, how: Optional[str] = None) -> Any:
         """ Prepare command line options for given method """
         return [
             click.option(
@@ -180,7 +182,7 @@ class DiscoverFmf(tmt.steps.discover.DiscoverPlugin):
                 ),
             ] + super().options(how)
 
-    def wake(self, keys=None):
+    def wake(self, keys: Optional[List[str]] = None) -> None:
         """ Wake up the plugin, process data, apply options """
         # Handle backward-compatible stuff
         if 'repository' in self.data:
@@ -195,13 +197,13 @@ class DiscoverFmf(tmt.steps.discover.DiscoverPlugin):
         super().wake(keys=keys)
 
     @property
-    def is_in_standalone_mode(self):
+    def is_in_standalone_mode(self) -> bool:
         """ Enable standalone mode when listing fmf ids """
         if self.opt('fmf_id'):
             return True
         return super().is_in_standalone_mode
 
-    def go(self):
+    def go(self) -> None:
         """ Discover available tests """
         super(DiscoverFmf, self).go()
 
@@ -224,7 +226,7 @@ class DiscoverFmf(tmt.steps.discover.DiscoverPlugin):
                 "Cannot manipulate with dist-git without "
                 "the `--dist-git-merge` option.")
 
-        def get_git_root(dir):
+        def get_git_root(dir: str) -> Any:
             return self.run(
                 ["git", "rev-parse", "--show-toplevel"],
                 cwd=dir, dry=True)[0].strip('\n')
@@ -478,6 +480,6 @@ class DiscoverFmf(tmt.steps.discover.DiscoverPlugin):
             for test in self._tests:
                 test.environment['TMT_SOURCE_DIR'] = sourcedir
 
-    def tests(self):
+    def tests(self) -> List[Test]:
         """ Return all discovered tests """
         return self._tests
