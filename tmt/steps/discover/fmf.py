@@ -3,6 +3,7 @@ import os
 import re
 import shutil
 import subprocess
+from typing import Any, List, Optional
 
 import click
 import fmf
@@ -10,9 +11,8 @@ import fmf
 import tmt
 import tmt.beakerlib
 import tmt.steps.discover
-
-from typing import Any, List, Optional
 from tmt.base import Test
+
 
 class DiscoverFmf(tmt.steps.discover.DiscoverPlugin):  # type: ignore[misc]
     """
@@ -197,13 +197,13 @@ class DiscoverFmf(tmt.steps.discover.DiscoverPlugin):  # type: ignore[misc]
         super().wake(keys=keys)
 
     @property
-    def is_in_standalone_mode(self) -> bool:
+    def is_in_standalone_mode(self) -> Any:
         """ Enable standalone mode when listing fmf ids """
         if self.opt('fmf_id'):
             return True
         return super().is_in_standalone_mode
 
-    def go(self) -> None:
+    def go(self) -> Any:
         """ Discover available tests """
         super(DiscoverFmf, self).go()
 
@@ -234,7 +234,7 @@ class DiscoverFmf(tmt.steps.discover.DiscoverPlugin):  # type: ignore[misc]
         # Raise an exception if --fmf-id uses w/o url and git root
         # doesn't exist for discovered plan
         if self.opt('fmf_id'):
-            def assert_git_url(plan_name=None):
+            def assert_git_url(plan_name: Optional[str] = None) -> None:
                 try:
                     subprocess.run(
                         'git rev-parse --show-toplevel'.split(),
