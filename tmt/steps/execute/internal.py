@@ -1,13 +1,16 @@
 import os
 import sys
 import time
+from typing import Any, Dict, List, Optional
 
 import click
 
 import tmt
 import tmt.steps.execute
 import tmt.utils
+from tmt.base import Result, Test
 from tmt.steps.execute import TEST_OUTPUT_FILENAME, Script
+from tmt.steps.provision import Guest
 
 # Script handling reboots, in restraint compatible fashion
 TMT_REBOOT_SCRIPT = Script("/usr/local/bin/tmt-reboot",
@@ -43,7 +46,7 @@ REBOOT_REQUEST_FILENAME = "reboot_request"
 SCRIPTS = (TMT_FILE_SUBMIT_SCRIPT, TMT_REBOOT_SCRIPT, TMT_REPORT_RESULT_SCRIPT)
 
 
-class ExecuteInternal(tmt.steps.execute.ExecutePlugin):
+class ExecuteInternal(tmt.steps.execute.ExecutePlugin):  # type: ignore[misc]
     """
     Use the internal tmt executor to execute tests
 
@@ -63,13 +66,13 @@ class ExecuteInternal(tmt.steps.execute.ExecutePlugin):
     # Supported keys
     _keys = ["script", "interactive"]
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
         self._previous_progress_message = ""
         self.scripts = SCRIPTS
 
     @classmethod
-    def options(cls, how=None):
+    def options(cls, how: Optional[str] = None) -> Any:
         """ Prepare command line options for given method """
         options = []
         # Shell script as a test
@@ -86,7 +89,8 @@ class ExecuteInternal(tmt.steps.execute.ExecutePlugin):
             help='Disable interactive progress bar showing the current test.'))
         return options + super().options(how)
 
-    def wake(self, keys=None):
+    # TODO: use better types once superclass gains its annotations
+    def wake(self, keys: Optional[List[str]] = None) -> None:
         """ Wake up the plugin, process data, apply options """
         super().wake(keys=keys)
         # Make sure that script is a list
@@ -94,7 +98,8 @@ class ExecuteInternal(tmt.steps.execute.ExecutePlugin):
 
     # TODO: consider switching to utils.updatable_message() - might need more
     # work, since use of _show_progress is split over several methods.
-    def _show_progress(self, progress, test_name, finish=False):
+    def _show_progress(self, progress: Any, test_name: str,
+                       finish: Optional[bool] = False) -> None:
         """
         Show an interactive progress bar in non-verbose mode.
 
@@ -131,7 +136,7 @@ class ExecuteInternal(tmt.steps.execute.ExecutePlugin):
             self._previous_progress_message = ""
         sys.stdout.flush()
 
-    def _test_environment(self, test, extra_environment):
+    def _test_environment(self, test: Test, extra_environment: Dict[str, Any]) -> Dict[str, Any]:
         """ Return test environment """
         data_directory = self.data_path(test, full=True, create=True)
 
@@ -155,7 +160,8 @@ class ExecuteInternal(tmt.steps.execute.ExecutePlugin):
 
         return environment
 
-    def execute(self, test, guest, progress, extra_environment):
+    def execute(self, test: Test, guest: Guest, progress: Any,
+                extra_environment: Dict[str, Any]) -> None:
         """ Run test on the guest """
         # Provide info/debug message
         self._show_progress(progress, test.name)
@@ -177,7 +183,12 @@ class ExecuteInternal(tmt.steps.execute.ExecutePlugin):
             command = test.test
 
         # Prepare custom function to log output in verbose mode
-        def log(key, value=None, color=None, shift=1, level=1):
+        def log(
+                key: str,
+                value: Optional[Any] = None,
+                color: Optional[str] = None,
+                shift: Optional[int] = 1,
+                level: Optional[int] = 1) -> None:
             self.verbose(key, value, color, shift=2, level=3)
 
         # Execute the test, save the output and return code
@@ -205,7 +216,7 @@ class ExecuteInternal(tmt.steps.execute.ExecutePlugin):
         self.verbose(
             f"{duration} {test.name} [{progress}]{timeout}", shift=shift)
 
-    def check(self, test):
+    def check(self, test: Test) -> Any:
         """ Check the test result """
         self.debug(f"Check result of '{test.name}'.")
         if test.framework == 'beakerlib':
@@ -216,7 +227,7 @@ class ExecuteInternal(tmt.steps.execute.ExecutePlugin):
             except tmt.utils.FileError:
                 return self.check_shell(test)
 
-    def _handle_reboot(self, test, guest):
+    def _handle_reboot(self, test: Test, guest: Guest) -> bool:
         """
         Reboot the guest if the test requested it.
 
@@ -252,10 +263,10 @@ class ExecuteInternal(tmt.steps.execute.ExecutePlugin):
             return True
         return False
 
-    def go(self, guest):
+    def go(self, guest: Guest) -> None:
         """ Execute available tests """
         super().go()
-        self._results = []
+        self._results: List[Result] = []
 
         # Nothing to do in dry mode
         if self.opt('dry'):
@@ -264,7 +275,7 @@ class ExecuteInternal(tmt.steps.execute.ExecutePlugin):
 
         self._run_tests(guest)
 
-    def _run_tests(self, guest, extra_environment=None):
+    def _run_tests(self, guest: Guest, extra_environment: Optional[Dict[str, Any]] = None) -> None:
         """ Execute tests on provided guest """
         extra_environment = extra_environment or {}
 
@@ -318,11 +329,11 @@ class ExecuteInternal(tmt.steps.execute.ExecutePlugin):
         self.debug("Pull the plan data directory.", level=2)
         guest.pull(source=self.step.plan.data_directory)
 
-    def results(self):
+    def results(self) -> List[Any]:
         """ Return test results """
         return self._results
 
-    def requires(self):
+    def requires(self) -> Any:
         """ Return list of required packages """
         # FIXME Remove when we drop support for the old execution methods
         return ['beakerlib'] if self.step._framework == 'beakerlib' else []
