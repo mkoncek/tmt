@@ -3,7 +3,7 @@ import os
 import re
 import shutil
 import subprocess
-from typing import Any, List, Optional
+from typing import Any, List, Optional, cast
 
 import click
 import fmf
@@ -447,7 +447,7 @@ class DiscoverFmf(tmt.steps.discover.DiscoverPlugin):  # type: ignore[misc]
                 ['git', 'log', '--format=', '--stat', '--name-only',
                  f"{modified_ref}..HEAD"], cwd=self.testdir)[0]
             modified = set(
-                f"^/{re.escape(name)}"
+                f"^/{re.escape(cast(str, name))}"
                 for name in map(os.path.dirname, output.split('\n')) if name)
             self.debug(f"Limit to modified test dirs: {modified}", level=3)
             names.extend(modified)
