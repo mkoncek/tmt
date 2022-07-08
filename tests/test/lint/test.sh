@@ -128,7 +128,7 @@ rlJournalStart
 
         # '.' as local directory with single file and a explicit one
         rlRun "pushd foobar"
-        rlRun -s "$lint_cmd . $(realpath ../baz/bb.fmf)"
+        rlRun -s "$lint_cmd *.fmf $(realpath ../baz/bb.fmf)"
         rlAssertGrep "/foobar" "$rlRun_LOG"
         rlAssertGrep "/baz/bb" "$rlRun_LOG"
         for t in /virtual /foo/special /foo/special; do

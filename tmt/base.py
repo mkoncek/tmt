@@ -1382,7 +1382,6 @@ class Tree(tmt.utils.Common):
         excludes = (excludes or []) + list(Test._opt('exclude', []))
         # Used in: tmt run test --name NAME, tmt test ls NAME...
         cmd_line_names = list(Test._opt('names', []))
-        source = Test._opt('source', False)
 
         def name_filter(nodes):
             """ Filter nodes based on names provided on the command line """
@@ -1392,25 +1391,8 @@ class Tree(tmt.utils.Common):
                 node for node in nodes
                 if any([re.search(name, node.name) for name in cmd_line_names])]
 
-        def defined_by_source(obj_sources, query_sources):
-            """ True if object_sources contains some string from query_sources """
-            return bool(query_sources.intersection(set(obj_sources)))
-
-        if source:
-            query_sources = set()
-            for src in cmd_line_names:
-                # '.' as shortcut for all fmf files in cwd
-                # but it is already modified by _save_context()
-                if src.endswith('(/|$)') or '.' == src:
-                    query_sources.update([os.path.join(os.getcwd(), n)
-                                          for n in os.listdir() if n.endswith('.fmf')])
-                # Expand relative paths (easier to type manually on the cmdline)
-                else:
-                    query_sources.add(os.path.abspath(src))
-            tests = [
-                Test(test) for test in self.tree.prune(
-                    keys=keys) if defined_by_source(
-                    test.sources, query_sources)]
+        if Test._opt('source'):
+            tests = [Test(test) for test in self.tree.prune(keys=keys, sources=cmd_line_names)]
         else:
             # First let's build the list of test objects based on keys & names.
             # If duplicate test names are allowed, match test name/regexp
@@ -1445,10 +1427,17 @@ class Tree(tmt.utils.Common):
         links = (links or []) + list(Plan._opt('links', []))
         excludes = (excludes or []) + list(Plan._opt('exclude', []))
 
+        # For --source option use names as sources
+        if Plan._opt('source'):
+            sources = names
+            names = None
+        else:
+            sources = None
+
         # Build the list, convert to objects, sort and filter
         plans = [
             Plan(plan, run=run) for plan
-            in self.tree.prune(keys=keys, names=names)]
+            in self.tree.prune(keys=keys, names=names, sources=sources)]
         return self._filters_conditions(
             sorted(plans, key=lambda plan: plan.order),
             filters, conditions, links, excludes)
@@ -1464,10 +1453,17 @@ class Tree(tmt.utils.Common):
         links = (links or []) + list(Story._opt('links', []))
         excludes = (excludes or []) + list(Story._opt('exclude', []))
 
+        # For --source option use names as sources
+        if Story._opt('source'):
+            sources = names
+            names = None
+        else:
+            sources = None
+
         # Build the list, convert to objects, sort and filter
         stories = [
             Story(story) for story
-            in self.tree.prune(keys=keys, names=names, whole=whole)]
+            in self.tree.prune(keys=keys, names=names, whole=whole, sources=sources)]
         return self._filters_conditions(
             sorted(stories, key=lambda story: story.order),
             filters, conditions, links, excludes)

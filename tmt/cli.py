@@ -104,7 +104,7 @@ def name_filter_condition(function):
 
 def source(function):
     return click.option(
-        '--source', is_flag=True, help="#FIXME Operate on files than on names"
+        '--source', is_flag=True, help="Select by fmf source file names instead of object names."
         )(function)
 
 
@@ -706,6 +706,7 @@ def plans_show(context, **kwargs):
 @plans.command(name='lint')
 @click.pass_context
 @name_filter_condition
+@source
 @verbose_debug_quiet
 def plans_lint(context, **kwargs):
     """
@@ -989,6 +990,7 @@ def stories_export(
 @stories.command(name='lint')
 @click.pass_context
 @name_filter_condition
+@source
 @verbose_debug_quiet
 def stories_lint(context, **kwargs):
     """
@@ -1243,6 +1245,7 @@ def clean_images(context, **kwargs):
 @main.command(name='lint')
 @click.pass_context
 @name_filter_condition
+@source
 @fix
 @verbose_debug_quiet
 def lint(context, **kwargs):
