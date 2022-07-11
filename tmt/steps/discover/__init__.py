@@ -1,23 +1,32 @@
 import os
+from typing import TYPE_CHECKING, Any, List, Optional, Type
 
 import click
 from fmf.utils import listed
 
 import tmt
+from tmt.steps import StepData
+
+if TYPE_CHECKING:
+    import tmt.steps
+    import tmt.base
+
 import tmt.utils
 
 
 class Discover(tmt.steps.Step):
     """ Gather information about test cases to be executed. """
 
-    def __init__(self, plan, data):
+    data: List[StepData]
+
+    def __init__(self, plan: tmt.base.Plan, data: tmt.steps.StepData):
         """ Store supported attributes, check for sanity """
         super().__init__(plan=plan, data=data)
 
         # List of Test() objects representing discovered tests
-        self._tests = []
+        self._tests: List[tmt.base.Test] = []
 
-    def load(self, extra_keys=None):
+    def load(self, extra_keys: Optional[List[str]] = None) -> None:
         """ Load step data from the workdir """
         extra_keys = extra_keys or []
         super().load(extra_keys)
@@ -28,7 +37,7 @@ class Discover(tmt.steps.Step):
         except tmt.utils.FileError:
             self.debug('Discovered tests not found.', level=2)
 
-    def save(self, data=None):
+    def save(self, data: Optional[tmt.steps.StepData] = None) -> None:
         """ Save step data to the workdir """
         data = data or {}
         super().save(data)
@@ -47,7 +56,7 @@ class Discover(tmt.steps.Step):
             for test in self.tests()])
         self.write('run.yaml', tmt.utils.dict_to_yaml(tests, width=1000000))
 
-    def _discover_from_execute(self):
+    def _discover_from_execute(self) -> None:
         """ Check the execute step for possible shell script tests """
 
         # Check scripts for command line and data, convert to list if needed
@@ -84,7 +93,7 @@ class Discover(tmt.steps.Step):
         else:
             self.data[0]['tests'] = tests
 
-    def wake(self):
+    def wake(self) -> None:
         """ Wake up the step (process workdir and command line) """
         super().wake()
 
@@ -94,7 +103,7 @@ class Discover(tmt.steps.Step):
 
         # Choose the right plugin and wake it up
         for data in self.data:
-            plugin = DiscoverPlugin.delegate(self, data)
+            plugin = DiscoverPlugin.delegate(self, dict(data))
             self._phases.append(plugin)
             plugin.wake()
 
@@ -107,12 +116,12 @@ class Discover(tmt.steps.Step):
             self.status('todo')
             self.save()
 
-    def show(self):
+    def show(self) -> None:
         """ Show discover details """
         for data in self.data:
-            DiscoverPlugin.delegate(self, data).show()
+            DiscoverPlugin.delegate(self, dict(data)).show()
 
-    def summary(self):
+    def summary(self) -> None:
         """ Give a concise summary of the discovery """
         # Summary of selected tests
         text = listed(len(self.tests()), 'test') + ' selected'
@@ -121,7 +130,7 @@ class Discover(tmt.steps.Step):
         for test in self.tests():
             self.verbose(test.name, color='red', shift=2)
 
-    def go(self):
+    def go(self) -> None:
         """ Execute all steps """
         super().go()
 
@@ -169,11 +178,11 @@ class Discover(tmt.steps.Step):
         self.status('done')
         self.save()
 
-    def tests(self):
+    def tests(self) -> List[tmt.base.Test]:
         """ Return the list of all enabled tests """
         return [test for test in self._tests if test.enabled]
 
-    def requires(self):
+    def requires(self) -> List[str]:
         """ Return all tests' requires """
         requires = set()
         for test in self.tests():
@@ -181,7 +190,7 @@ class Discover(tmt.steps.Step):
                 requires.add(value)
         return list(requires)
 
-    def recommends(self):
+    def recommends(self) -> List[str]:
         """ Return all packages recommended by tests """
         recommends = set()
         for test in self.tests():
@@ -194,7 +203,7 @@ class DiscoverPlugin(tmt.steps.Plugin):
     """ Common parent of discover plugins """
 
     # List of all supported methods aggregated from all plugins
-    _supported_methods = []
+    _supported_methods: List[tmt.steps.Method] = []
 
     # Common keys for all discover step implementations
     _common_keys = [
@@ -203,11 +212,14 @@ class DiscoverPlugin(tmt.steps.Plugin):
         ]
 
     @classmethod
-    def base_command(cls, method_class=None, usage=None):
+    def base_command(cls,
+                     method_class: Optional[Type[click.Command]] = None,
+                     usage: Optional[str] = None) -> click.Command:
         """ Create base click command (common for all discover plugins) """
 
         # Prepare general usage message for the step
         if method_class:
+            assert usage is not None
             usage = Discover.usage(method_overview=usage)
 
         # Create the command
@@ -216,11 +228,12 @@ class DiscoverPlugin(tmt.steps.Plugin):
         @click.option(
             '-h', '--how', metavar='METHOD',
             help='Use specified method to discover tests.')
-        def discover(context, **kwargs):
+        def discover(context: click.Context, **kwargs: Any) -> None:
             # TODO: This part should go into the 'fmf.py' module
             if kwargs.get('fmf_id'):
                 # Set quiet, disable debug and verbose to avoid logging
                 # to terminal with discover --fmf-id
+                assert context.parent is not None
                 context.parent.params['quiet'] = True
                 context.parent.params['debug'] = 0
                 context.parent.params['verbose'] = 0
@@ -229,8 +242,9 @@ class DiscoverPlugin(tmt.steps.Plugin):
 
         return discover
 
+    # TODO: Change the type to ClickOptionDecoratorType in the future
     @classmethod
-    def options(cls, how=None):
+    def options(cls, how: Optional[str] = None) -> Any:
         """ Prepare command line options for given method """
         return [
             click.option(
@@ -242,9 +256,9 @@ class DiscoverPlugin(tmt.steps.Plugin):
                 type=click.Choice(tmt.utils.get_distgit_handler_names()),
                 help='Use the provided DistGit handler '
                      'instead of the auto detection.'),
-            ] + super().options(how)
+            ] + super().options(how)  # type: ignore
 
-    def tests(self):
+    def tests(self) -> List[tmt.base.Test]:
         """
         Return discovered tests
 
@@ -254,7 +268,7 @@ class DiscoverPlugin(tmt.steps.Plugin):
         raise NotImplementedError
 
     def extract_distgit_source(
-            self, distgit_dir, target_dir, handler_name=None):
+            self, distgit_dir: str, target_dir: str, handler_name: Optional[str] = None) -> None:
         """
         Extract source tarball into target_dir
 
@@ -265,6 +279,7 @@ class DiscoverPlugin(tmt.steps.Plugin):
             stdout, _ = self.run(
                 ["git", "config", "--get-regexp", '^remote\\..*.url'],
                 cwd=distgit_dir)
+            assert stdout is not None
             remotes = stdout.split('\n')
             handler = tmt.utils.get_distgit_handler(remotes=remotes)
         else:

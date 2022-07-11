@@ -17,7 +17,7 @@ import tmt.utils
 from tmt.options import show_step_method_hints
 
 if TYPE_CHECKING:
-    from tmt.base import Plan
+    from tmt.base import Plan, Test
     from tmt.steps.provision import Guest
 
 # Supported steps and actions
@@ -68,6 +68,7 @@ class StepData(TypedDict, total=False):
     """
     name: Optional[str]
     how: Optional[str]
+    tests: Optional[List[Test]]
 
 
 class Step(tmt.utils.Common):
@@ -402,7 +403,7 @@ class Plugin(Phase, metaclass=PluginIndex):
         self.step = step
 
     @classmethod
-    def base_command(cls, method_class: Optional[Method] = None,
+    def base_command(cls, method_class: Optional[Type[click.Command]] = None,
                      usage: Optional[str] = None) -> click.Command:
         """ Create base click command (common for all step plugins) """
         raise NotImplementedError
@@ -432,7 +433,7 @@ class Plugin(Phase, metaclass=PluginIndex):
             commands[method.name] = command
 
         # Create base command with common options using method class
-        method_class: Method = tmt.options.create_method_class(commands)
+        method_class: Type[click.Command] = tmt.options.create_method_class(commands)
         command = cls.base_command(
             method_class, usage=method_overview)
         # Apply common options
