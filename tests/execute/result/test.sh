@@ -46,6 +46,37 @@ rlJournalStart
         run   "errr"   "/test/always-error"   "pass"     2
     rlPhaseEnd
 
+    rlPhaseStartTest "Verbose execute prints result"
+        rlRun -s "tmt run --id \${run} --scratch --until execute tests --filter tag:-needs_reboot provision --how local execute -v" "2"
+        while read -r line; do
+            rlAssertGrep "$line" "$rlRun_LOG" -F
+        done <<-EOF
+00:00:00 errr /test/always-error (original result: pass) [1/12]
+00:00:00 fail /test/always-fail (original result: pass) [2/12]
+00:00:00 info /test/always-info (original result: pass) [3/12]
+00:00:00 pass /test/always-pass (original result: fail) [4/12]
+00:00:00 warn /test/always-warn (original result: pass) [5/12]
+00:00:00 errr /test/error [6/12]
+00:00:01 errr /test/error-timeout (timeout) [7/12]
+00:00:00 fail /test/fail [8/12]
+00:00:00 pass /test/pass [9/12]
+00:00:00 errr /test/xfail-error (original result: error) [10/12]
+00:00:00 pass /test/xfail-fail (original result: fail) [11/12]
+00:00:00 fail /test/xfail-pass (original result: pass) [12/12]
+EOF
+    rlPhaseEnd
+
+    rlPhaseStartTest "Verbose execute prints result - reboot case"
+        # Before the reboot results is not known
+        rlRun -s "tmt run --id \${run} --scratch --until execute tests --filter tag:needs_reboot provision --how container execute -v"
+        EXPECTED=$(cat <<EOF
+            00:00:00 /test/xfail-with-reboot [1/1]
+            00:00:00 pass /test/xfail-with-reboot (original result: fail) [1/1]
+EOF
+)
+    rlAssertEquals "Output matches the expectation" "$EXPECTED" "$(grep /test/xfail-with-reboot $rlRun_LOG)"
+    rlPhaseEnd
+
     rlPhaseStartCleanup
         rlRun "popd"
         rlRun "rm -r ${run}" 0 "Remove run directory"

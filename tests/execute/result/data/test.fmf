@@ -7,6 +7,15 @@
 /error:
     summary: Run a non-existing command
     test: a-weird-command
+/error-timeout:
+    summary: Too long execution
+    test: sleep 10
+    duration: 1s
+/xfail-with-reboot:
+    summary: Do reboot in the test
+    test: "if [ $TMT_REBOOT_COUNT -eq 0 ]; then tmt-reboot; fi; false"
+    result: xfail
+    tag: [ needs_reboot ]
 
 /xfail-fail:
     summary: Run command 'false' but report pass
