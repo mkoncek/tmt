@@ -2,27 +2,24 @@
 """ Base Metadata Classes """
 
 import copy
+import dataclasses
 import functools
 import os
 import re
 import shutil
 import subprocess
-import sys
 import time
-from typing import Optional
+from typing import List, Optional, Tuple
 
 import click
 import fmf
+import fmf.base
 from click import echo, style
 from fmf.utils import listed
 from ruamel.yaml.error import MarkedYAMLError
 
-if sys.version_info >= (3, 8):
-    from typing import TypedDict
-else:
-    from typing_extensions import TypedDict
-
 import tmt.export
+import tmt.identifier
 import tmt.steps
 import tmt.steps.discover
 import tmt.steps.execute
@@ -32,7 +29,6 @@ import tmt.steps.provision
 import tmt.steps.report
 import tmt.templates
 import tmt.utils
-import tmt.uuid
 from tmt.utils import verdict
 
 # Default test duration is 5m for individual tests discovered from L1
@@ -67,11 +63,45 @@ SECTIONS_HEADINGS = {
 
 # See https://fmf.readthedocs.io/en/latest/concept.html#identifiers for
 # formal specification.
-class FmfIdType(TypedDict):
-    url: Optional[str]
-    ref: Optional[str]
-    path: Optional[str]
-    name: Optional[str]
+@dataclasses.dataclass
+class FmfId:
+    url: Optional[str] = None
+    ref: Optional[str] = None
+    path: Optional[str] = None
+    name: Optional[str] = None
+
+    def validate(self) -> Tuple[bool, str]:
+        """
+        Validate fmf id and return a human readable error
+
+        Return a tuple (boolean, message) as the result of validation.
+        The boolean specifies the validation result and the message
+        the validation error. In case the FMF id is valid, return an empty
+        string as the message.
+        """
+        # Validate remote id and translate to human readable errors
+        try:
+            # Simple asdict() is not good enough, fmf does not like keys that exist but are `None`.
+            # Don't include those.
+            fmf.base.Tree.node({
+                key: value for key, value in dataclasses.asdict(self).items()
+                if value is not None
+                })
+        except fmf.utils.GeneralError as error:
+            # Map fmf errors to more user friendly alternatives
+            error_map: List[Tuple[str, str]] = [
+                ('git clone', f"repo '{self.url}' cannot be cloned"),
+                ('git checkout', f"git ref '{self.ref}' is invalid"),
+                ('directory path', f"path '{self.path}' is invalid"),
+                ('tree root', f"No tree found in repo '{self.url}', missing an '.fmf' directory?")
+                ]
+
+            stringified_error = str(error)
+
+            errors = [message for needle, message in error_map if needle in stringified_error]
+            return (False, errors[0] if errors else stringified_error)
+
+        return (True, '')
 
 
 class Core(tmt.utils.Common):
@@ -113,8 +143,8 @@ class Core(tmt.utils.Common):
 
         # Store the unique id if provided
         try:
-            self.id = tmt.uuid.get_id(self.node)
-        except tmt.uuid.IdLeafError:
+            self.id = tmt.identifier.get_id(self.node)
+        except tmt.identifier.IdLeafError:
             raise tmt.utils.SpecificationError(
                 f"The 'id' key '{self.node.get('id')}' in '{self.name}' "
                 f"is inherited from parent, should be defined in a leaf.")
@@ -556,7 +586,6 @@ class Test(Core):
 
         # Prepare special format for the executor
         if format_ == 'execute':
-            name = self.name
             data = dict()
             data['test'] = self.test
             data['path'] = self.path
@@ -571,6 +600,10 @@ class Test(Core):
         # Export to Nitrate test case management system
         elif format_ == 'nitrate':
             tmt.export.export_to_nitrate(self)
+
+        # Export to Polarion test case management system
+        elif format_ == 'polarion':
+            tmt.export.export_to_polarion(self)
 
         # Export the fmf identifier
         elif keys == 'fmf-id':
@@ -593,6 +626,7 @@ class Plan(Core):
     extra_L2_keys = [
         'context',
         'environment',
+        'environment-file',
         'gate',
         ]
 
@@ -619,17 +653,17 @@ class Plan(Core):
 
         # Initialize test steps
         self.discover = tmt.steps.discover.Discover(
-            self.node.get('discover'), self)
+            plan=self, data=self.node.get('discover'))
         self.provision = tmt.steps.provision.Provision(
-            self.node.get('provision'), self)
+            plan=self, data=self.node.get('provision'))
         self.prepare = tmt.steps.prepare.Prepare(
-            self.node.get('prepare'), self)
+            plan=self, data=self.node.get('prepare'))
         self.execute = tmt.steps.execute.Execute(
-            self.node.get('execute'), self)
+            plan=self, data=self.node.get('execute'))
         self.report = tmt.steps.report.Report(
-            self.node.get('report'), self)
+            plan=self, data=self.node.get('report'))
         self.finish = tmt.steps.finish.Finish(
-            self.node.get('finish'), self)
+            plan=self, data=self.node.get('finish'))
 
         # Relevant gates (convert to list if needed)
         self.gate = node.get('gate')
@@ -675,7 +709,7 @@ class Plan(Core):
             raise tmt.utils.SpecificationError(
                 f"The 'environment-file' should be a list. "
                 f"Received '{type(environment_files).__name__}'.")
-        combined = tmt.utils.environment_file_to_dict(
+        combined = tmt.utils.environment_files_to_dict(
             environment_files, root=node.root)
 
         # Environment variables from key, make sure that values are string
@@ -747,10 +781,12 @@ class Plan(Core):
                     #        using round-trip mode and since it comes from the
                     #        command-line, no formatting is applied resulting
                     #        in inconsistent formatting. Using a safe loader in
-                    #        this case is a hack to make it forget, though there
-                    #        may be a better way to do this.
+                    #        this case is a hack to make it forget, though
+                    #        there may be a better way to do this.
                     try:
                         data = tmt.utils.yaml_to_dict(option, yaml_type='safe')
+                        if not (data):
+                            raise tmt.utils.GeneralError("Step data cannot be empty.")
                     except tmt.utils.GeneralError as error:
                         raise tmt.utils.GeneralError(
                             f"Invalid step data for {step}: '{option}'"
@@ -899,9 +935,13 @@ class Plan(Core):
     def _lint_discover_fmf(discover):
         """ Lint fmf discover method """
         # Validate remote id and translate to human readable errors
-        valid, error = tmt.utils.validate_fmf_id(
-            {key: value for key, value in discover.items()
-                if key in ['url', 'ref', 'path']})
+        fmf_id_data = {
+            key: value
+            for key, value in discover.items()
+            if key in ['url', 'ref', 'path']
+            }
+
+        valid, error = FmfId(**fmf_id_data).validate()
 
         if valid:
             name = discover.get('name')
@@ -1278,7 +1318,7 @@ class Tree(tmt.utils.Common):
                 if not all([fmf.utils.evaluate(condition, cond_vars, node)
                             for condition in conditions]):
                     continue
-            except fmf.utils.FilterError as error:
+            except fmf.utils.FilterError:
                 # Handle missing attributes as if condition failed
                 continue
             except Exception as error:
@@ -1289,7 +1329,7 @@ class Tree(tmt.utils.Common):
                 if not all([fmf.utils.filter(filter_, filter_vars, regexp=True)
                             for filter_ in filters]):
                     continue
-            except fmf.utils.FilterError as error:
+            except fmf.utils.FilterError:
                 # Handle missing attributes as if filter failed
                 continue
             # Links
@@ -1496,7 +1536,7 @@ class Run(tmt.utils.Common):
         # The default discover method for this case is 'shell'
         default_plan['/plans/default']['discover']['how'] = 'shell'
         self.tree = tmt.Tree(tree=fmf.Tree(default_plan))
-        self.debug(f"No metadata found, using the default plan.")
+        self.debug("No metadata found, using the default plan.")
 
     def _save_tree(self, tree):
         """ Save metadata tree, handle the default plan """
@@ -1509,11 +1549,11 @@ class Run(tmt.utils.Common):
                 new_tree = fmf.Tree(default_plan)
                 new_tree.root = self.tree.root
                 self.tree.tree = new_tree
-                self.debug(f"Enforcing use of default plan")
+                self.debug("Enforcing use of default plan")
             # Insert default plan if no plan detected
             if not list(self.tree.tree.prune(keys=['execute'])):
                 self.tree.tree.update(default_plan)
-                self.debug(f"No plan found, adding the default plan.")
+                self.debug("No plan found, adding the default plan.")
         # Create an empty default plan if no fmf metadata found
         except tmt.utils.MetadataError:
             self._use_default_plan()
@@ -1526,7 +1566,7 @@ class Run(tmt.utils.Common):
             self._environment_from_options = dict()
             # Variables gathered from 'environment-file' options
             self._environment_from_options.update(
-                tmt.utils.environment_file_to_dict(
+                tmt.utils.environment_files_to_dict(
                     (self.opt('environment-file') or []),
                     root=self.tree.root))
             # Variables from 'environment' options (highest priority)
@@ -2047,7 +2087,7 @@ class Result(object):
         'error': 'magenta',
         }
 
-    def __init__(self, data, name):
+    def __init__(self, data, name, interpret='respect'):
         """
         Initialize test result data """
 
@@ -2072,6 +2112,29 @@ class Result(object):
             self.log = tmt.utils.listify(data['log'])
         except KeyError:
             self.log = []
+
+        # Handle alternative result interpretation
+        if interpret != "respect":
+            # Extend existing note or set a new one
+            if self.note and isinstance(self.note, str):
+                self.note += f', original result: {self.result}'
+            elif self.note is None:
+                self.note = f'original result: {self.result}'
+            else:
+                raise tmt.utils.SpecificationError(
+                    f"Test result note '{self.note}' must be a string.")
+
+            if interpret == "xfail":
+                # Swap just fail<-->pass, keep the rest as is (info, warn,
+                # error)
+                self.result = {
+                    'fail': 'pass', 'pass': 'fail'}.get(
+                    self.result, self.result)
+            elif interpret in self._results:
+                self.result = interpret
+            else:
+                raise tmt.utils.SpecificationError(
+                    f"Invalid result '{interpret}' in test '{name}'.")
 
     @staticmethod
     def total(results):

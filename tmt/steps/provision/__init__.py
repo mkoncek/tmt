@@ -34,9 +34,9 @@ class Provision(tmt.steps.Step):
     # Default implementation for provision is a virtual machine
     how = 'virtual'
 
-    def __init__(self, data, plan):
+    def __init__(self, plan, data):
         """ Initialize provision step data """
-        super().__init__(data, plan)
+        super().__init__(plan=plan, data=data)
         # Check that the names are unique
         names = [data.get('name') for data in self.data]
         names_count = collections.defaultdict(int)
@@ -258,6 +258,8 @@ class Guest(tmt.utils.Common):
         super().__init__(parent, name)
         # Initialize role, it will be overridden by load() if specified
         self.role = None
+        # Flag to indicate localhost guest, requires special handling
+        self.localhost = False
         self.load(data)
 
     def _random_name(self, prefix='', length=16):
@@ -841,7 +843,7 @@ class GuestSsh(Guest):
             # reboot command is completed. Let's ignore such errors.
             if error.returncode == 255:
                 self.debug(
-                    f"Seems the connection was closed too fast, ignoring.")
+                    "Seems the connection was closed too fast, ignoring.")
             else:
                 raise
         return self.reconnect()

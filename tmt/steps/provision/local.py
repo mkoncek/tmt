@@ -1,4 +1,5 @@
 import tmt
+import tmt.steps.provision
 
 
 class ProvisionLocal(tmt.steps.provision.ProvisionPlugin):
@@ -50,6 +51,11 @@ class ProvisionLocal(tmt.steps.provision.ProvisionPlugin):
 
 class GuestLocal(tmt.Guest):
     """ Local Host """
+
+    def __init__(self, data, name=None, parent=None):
+        """ Initialize guest data """
+        super().__init__(data, name, parent)
+        self.localhost = True
 
     def ansible(self, playbook, extra_args=None):
         """ Prepare localhost using ansible playbook """

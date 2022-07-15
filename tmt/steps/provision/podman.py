@@ -3,9 +3,14 @@ import os
 import click
 
 import tmt
+import tmt.steps.provision
 
 # Timeout in seconds of waiting for a connection
 CONNECTION_TIMEOUT = 60
+
+# Defaults
+DEFAULT_IMAGE = "fedora"
+DEFAULT_USER = "root"
 
 
 class ProvisionPodman(tmt.steps.provision.ProvisionPlugin):
@@ -19,13 +24,16 @@ class ProvisionPodman(tmt.steps.provision.ProvisionPlugin):
             image: fedora:latest
 
     In order to always pull the fresh container image use 'pull: true'.
+
+    In order to run the container with different user as the default 'root',
+    use 'user: USER'.
     """
 
     # Guest instance
     _guest = None
 
     # Supported keys
-    _keys = ["image", "container", "pull"]
+    _keys = ["image", "container", "pull", "user"]
 
     # Supported methods
     _methods = [tmt.steps.Method(name='container', doc=__doc__, order=50)]
@@ -43,13 +51,19 @@ class ProvisionPodman(tmt.steps.provision.ProvisionPlugin):
             click.option(
                 '-p', '--pull', is_flag=True,
                 help='Force pulling a fresh container image.'),
+            click.option(
+                '-u', '--user', metavar='USER',
+                help='User to use for all container operations.')
             ] + super().options(how)
 
     def default(self, option, default=None):
         """ Return default data for given option """
-        # User 'fedora' as a default image
+        # Use 'fedora' as a default image
         if option == 'image':
-            return 'fedora'
+            return DEFAULT_IMAGE
+        # Use 'root' as a default user
+        if option == 'user':
+            return DEFAULT_USER
         # No other defaults available
         return default
 
@@ -99,12 +113,14 @@ class GuestContainer(tmt.Guest):
         self.image = data.get('image')
         self.force_pull = data.get('pull')
         self.container = data.get('container')
+        self.user = data.get('user')
 
     def save(self):
         """ Save guest data for future wake up """
         data = super().save()
         data['container'] = self.container
         data['image'] = self.image
+        data['user'] = self.user
         return data
 
     def wake(self):
@@ -141,7 +157,7 @@ class GuestContainer(tmt.Guest):
         self.podman(
             ['run'] + workaround +
             ['--name', self.container, '-v', f'{workdir}:{workdir}:z',
-             '-itd', self.image])
+             '-itd', '--user', self.user, self.image])
 
     def reboot(self, hard=False, command=None):
         """ Restart the container, return True if successful  """
@@ -206,6 +222,10 @@ class GuestContainer(tmt.Guest):
         self.run(
             ["chcon", "--recursive", "--type=container_file_t",
              self.parent.plan.workdir], shell=False)
+        # In case explicit destination is given, use `podman cp` to copy data
+        # to the container
+        if destination:
+            self.podman(["cp", source, f"{self.container}:{destination}"])
 
     def pull(
             self,

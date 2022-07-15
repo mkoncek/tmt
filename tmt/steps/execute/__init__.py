@@ -1,9 +1,12 @@
 import os
 import re
 import time
+from dataclasses import dataclass, field
+from typing import List
 
 import click
 import fmf
+import pkg_resources
 
 import tmt
 
@@ -15,6 +18,13 @@ DEFAULT_FRAMEWORK = 'shell'
 
 # The main test output filename
 TEST_OUTPUT_FILENAME = 'output.txt'
+
+# Scripts source directory
+SCRIPTS_SRC_DIR = pkg_resources.resource_filename(
+    'tmt', 'steps/execute/scripts')
+
+# File in which report-result output is stored.
+RESTRAINT_REPORT_RESULT_OUTPUT = "restraint-result"
 
 
 class Execute(tmt.steps.Step):
@@ -33,11 +43,14 @@ class Execute(tmt.steps.Step):
     # Internal executor is the default implementation
     how = 'tmt'
 
-    def __init__(self, data, plan):
+    def __init__(self, plan, data):
         """ Initialize execute step data """
-        super().__init__(data, plan)
+        super().__init__(plan=plan, data=data)
         # List of Result() objects representing test results
         self._results = []
+
+        # List of scripts to install
+        self.scripts = []
 
         # Default test framework and mapping old methods
         # FIXME remove when we drop the old execution methods
@@ -54,7 +67,7 @@ class Execute(tmt.steps.Step):
             results = tmt.utils.yaml_to_dict(self.read('results.yaml'))
             self._results = [
                 tmt.Result(data, test) for test, data in results.items()]
-        except tmt.utils.FileError as error:
+        except tmt.utils.FileError:
             self.debug('Test results not found.', level=2)
 
     def save(self, data=None):
@@ -255,6 +268,21 @@ class ExecutePlugin(tmt.steps.Plugin):
                 metadata_filename, tmt.utils.dict_to_yaml(test._metadata))
         return tests
 
+    def prepare_scripts(self, guest):
+        """
+        Prepare additional scripts for testing
+        """
+        # Install all scripts on guest
+        for script in self.scripts:
+            source = os.path.join(
+                SCRIPTS_SRC_DIR, os.path.basename(script.path))
+
+            for dest in [script.path] + script.aliases:
+                guest.push(
+                    source=source,
+                    destination=dest,
+                    options=["-p", "--chmod=755"])
+
     def check_shell(self, test):
         """ Check result of a shell test """
         # Prepare the log path
@@ -269,7 +297,7 @@ class ExecutePlugin(tmt.steps.Plugin):
             if test.returncode == tmt.utils.PROCESS_TIMEOUT:
                 data['note'] = 'timeout'
                 self.timeout_hint(test)
-        return tmt.Result(data, test.name)
+        return tmt.Result(data, name=test.name, interpret=test.result)
 
     def check_beakerlib(self, test):
         """ Check result of a beakerlib test """
@@ -288,7 +316,7 @@ class ExecutePlugin(tmt.steps.Plugin):
         except tmt.utils.FileError:
             self.debug(f"Unable to read '{beakerlib_results_file}'.", level=3)
             data['note'] = 'beakerlib: TestResults FileError'
-            return tmt.Result(data, test.name)
+            return tmt.Result(data, name=test.name, interpret=test.result)
         try:
             result = re.search(
                 'TESTRESULT_RESULT_STRING=(.*)', results).group(1)
@@ -300,7 +328,7 @@ class ExecutePlugin(tmt.steps.Plugin):
                 f"No result or state found in '{beakerlib_results_file}'.",
                 level=3)
             data['note'] = 'beakerlib: Result/State missing'
-            return tmt.Result(data, test.name)
+            return tmt.Result(data, name=test.name, interpret=test.result)
         # Check if it was killed by timeout (set by tmt executor)
         if test.returncode == tmt.utils.PROCESS_TIMEOUT:
             data['result'] = 'error'
@@ -313,7 +341,51 @@ class ExecutePlugin(tmt.steps.Plugin):
         # Finally we have a valid result
         else:
             data['result'] = result.lower()
-        return tmt.Result(data, test.name)
+        return tmt.Result(data, name=test.name, interpret=test.result)
+
+    def check_result_file(self, test):
+        """
+        Check result file created by tmt-report-result
+
+        Extract the test result from the result file if it exists and
+        return a Result instance. Raise the FileError exception when no
+        test result file is found.
+        """
+        report_result_path = os.path.join(
+            self.data_path(test, full=True),
+            tmt.steps.execute.TEST_DATA,
+            RESTRAINT_REPORT_RESULT_OUTPUT)
+
+        # Nothing to do if there's no result file
+        if not os.path.exists(report_result_path):
+            raise tmt.utils.FileError
+
+        # Prepare the log path and duration
+        data = {'log': self.data_path(test, TEST_OUTPUT_FILENAME),
+                'duration': test.real_duration}
+
+        # Check the test result
+        self.debug("The report-result output file detected.", level=3)
+        with open(report_result_path) as result_file:
+            result = [line for line in result_file.readlines() if "TESTRESULT" in line]
+        if not result:
+            raise tmt.utils.ExecuteError(
+                f"Test result not found in result file '{report_result_path}'.")
+        result = result[0].split("=")[1].strip()
+
+        # Map the restraint result to the corresponding tmt value
+        try:
+            result_map = {
+                "PASS": "pass",
+                "FAIL": "fail",
+                "SKIP": "info",
+                "WARN": "warn",
+                }
+            data['result'] = result_map[result]
+        except KeyError:
+            data['result'] = "error"
+            data['note'] = f"invalid test result '{result}' in result file"
+        return tmt.Result(data, name=test.name, interpret=test.result)
 
     @staticmethod
     def test_duration(start, end):
@@ -333,3 +405,11 @@ class ExecutePlugin(tmt.steps.Plugin):
     def results(self):
         """ Return test results """
         raise NotImplementedError
+
+
+@dataclass
+class Script:
+    """ Represents a script provided by the internal executor """
+    path: str
+    aliases: List[str] = field(default_factory=list)
+    related_variables: List[str] = field(default_factory=list)

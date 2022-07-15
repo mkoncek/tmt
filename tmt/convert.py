@@ -41,6 +41,7 @@ JIRA_URL = 'https://issues.redhat.com/browse/'
 # Bug system constants
 SYSTEM_BUGZILLA = 1
 SYSTEM_JIRA = 2
+SYSTEM_OTHER = 42
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -167,13 +168,16 @@ def write_markdown(path: str, content: Dict[str, str]) -> None:
         raise ConvertError(f"Unable to write '{path}'.")
 
 
-def add_bug(bug: int, data: NitrateDataType,
-            system: int = SYSTEM_BUGZILLA) -> None:
-    """ Add relevant bug into data under the 'link' key """
+def add_link(target: int, data: NitrateDataType,
+            system: int = SYSTEM_BUGZILLA, type_: str = 'relates') -> None:
+    """ Add relevant link into data under the 'link' key """
+    new_link = dict()
     if system == SYSTEM_BUGZILLA:
-        new_link = dict(relates=f"{BUGZILLA_URL}{bug}")
+        new_link[type_] = f"{BUGZILLA_URL}{target}"
     elif system == SYSTEM_JIRA:
-        new_link = dict(relates=f"{JIRA_URL}{bug}")
+        new_link[type_] = f"{JIRA_URL}{target}"
+    elif system == SYSTEM_OTHER:
+        new_link[type_] = target
 
     try:
         # Make sure there are no duplicates
@@ -182,7 +186,7 @@ def add_bug(bug: int, data: NitrateDataType,
         data['link'].append(new_link)
     except KeyError:
         data['link'] = [new_link]
-    echo(style('relates: ', fg='green') + new_link['relates'])
+    echo(style(f'{type_}: ', fg='green') + new_link[type_])
 
 
 def read_datafile(
@@ -287,11 +291,23 @@ def read_datafile(
             echo(style('environment:', fg='green'))
             echo(pprint.pformat(data['environment']))
 
+    def sanitize_name(name):
+        """ Raise if package name starts with '-' (negative require) """
+        if name.startswith('-'):
+            # Beaker supports excluding packages but tmt does not
+            # https://github.com/teemtee/tmt/issues/1165#issuecomment-1122293224
+            raise ConvertError(
+                "Excluding packages is not supported by tmt require/recommend. "
+                "Plan can take care of such situation in Prepare step, "
+                "but cannot be created automatically. "
+                f"(Found '{name}' during conversion).")
+        return name
+
     # RhtsRequires or repoRequires (optional) goes to require
     requires = re.findall(regex_require, testinfo, re.M)
     if requires:
         data['require'] = [
-            require for line in requires
+            sanitize_name(require) for line in requires
             for require in line.split(rec_separator)]
         echo(style('require: ', fg='green') + ' '.join(data['require']))
 
@@ -299,7 +315,7 @@ def read_datafile(
     recommends = re.findall(regex_recommend, testinfo, re.M)
     if recommends:
         data['recommend'] = [
-            recommend for line in recommends
+            sanitize_name(recommend) for line in recommends
             for recommend in line.split(rec_separator)]
         echo(
             style('recommend: ', fg='green') + ' '.join(data['recommend']))
@@ -320,7 +336,7 @@ def read_datafile(
         # Add relevant bugs to the 'link' attribute
         for bug_line in re.findall(r'^Bug:\s*([0-9\s]+)', testinfo, re.M):
             for bug in re.findall(r'(\d+)', bug_line):
-                add_bug(bug, data, SYSTEM_BUGZILLA)
+                add_link(bug, data, SYSTEM_BUGZILLA)
 
     return beaker_task, data
 
@@ -478,7 +494,7 @@ def read(
         run_target_list.remove(data["test"])
         if run_target_list:
             echo(style(
-                f"warn: Extra lines detected in the 'run' target:",
+                "warn: Extra lines detected in the 'run' target:",
                 fg="yellow"))
             for line in run_target_list:
                 echo(f"    {line}")
@@ -486,7 +502,7 @@ def read(
         build_target_list = target_content("build")
         if len(build_target_list) > 1:
             echo(style(
-                f"warn: Multiple lines detected in the 'build' target:",
+                "warn: Multiple lines detected in the 'build' target:",
                 fg="yellow"))
             for line in build_target_list:
                 echo(f"    {line}")
@@ -795,7 +811,7 @@ def read_nitrate_case(
     except (KeyError, TypeError):
         pass
     for bug in testcase.bugs:
-        add_bug(bug.bug, data, bug.system)
+        add_link(bug.bug, data, bug.system)
 
     # Header and footer from notes (do not import the warning back)
     data['description'] = re.sub(
@@ -867,7 +883,7 @@ def write(path: str, data: NitrateDataType) -> None:
     """ Write gathered metadata in the fmf format """
     # Put keys into a reasonable order
     extra_keys = [
-        'adjust', 'extra-nitrate',
+        'adjust', 'extra-nitrate', 'extra-polarion',
         'extra-summary', 'extra-task',
         'extra-hardware', 'extra-pepa']
     sorted_data = dict()

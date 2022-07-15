@@ -18,16 +18,17 @@ from collections import OrderedDict
 from functools import lru_cache
 from pathlib import Path
 from threading import Thread
-from typing import (IO, TYPE_CHECKING, Any, BinaryIO, Dict, Generator,
-                    Iterable, List, NamedTuple, Optional, Pattern, Tuple, Type,
-                    TypeVar, Union, cast, overload)
+from typing import (IO, TYPE_CHECKING, Any, Dict, Generator, Iterable, List,
+                    NamedTuple, Optional, Pattern, Tuple, Type, TypeVar, Union,
+                    cast, overload)
 
 import click
 import fmf
 import requests
+import requests.adapters
+import requests.packages.urllib3.util.retry
+import urllib3.exceptions
 from click import echo, style, wrap_text
-from requests.adapters import HTTPAdapter
-from requests.packages.urllib3.util.retry import Retry
 from ruamel.yaml import YAML, scalarstring
 from ruamel.yaml.comments import CommentedMap
 
@@ -76,6 +77,15 @@ DEFAULT_SELECT_TIMEOUT = 5
 
 # Shell options to be set for all run shell scripts
 SHELL_OPTIONS = 'set -eo pipefail'
+
+# Defaults for HTTP/HTTPS retries and timeouts (see `retry_session()`).
+DEFAULT_RETRY_SESSION_RETRIES: int = 3
+DEFAULT_RETRY_SESSION_BACKOFF_FACTOR: float = 0.1
+
+# Defaults for HTTP/HTTPS retries for getting environment file
+# Retry with exponential backoff, maximum duration ~511 seconds
+ENVFILE_RETRY_SESSION_RETRIES: int = 10
+ENVFILE_RETRY_SESSION_BACKOFF_FACTOR: float = 1
 
 # A stand-in variable for generic use.
 T = TypeVar('T')
@@ -273,7 +283,8 @@ class Common(object):
             parent: Optional[CommonDerivedType] = None,
             name: Optional[str] = None,
             workdir: WorkdirArgumentType = None,
-            context: Optional[click.Context] = None):
+            context: Optional[click.Context] = None,
+            relative_indent: int = 1):
         """
         Initialize name and relation with the parent object
 
@@ -285,6 +296,9 @@ class Common(object):
         # Use lowercase class name as the default name
         self.name = name or self.__class__.__name__.lower()
         self.parent = parent
+
+        # Relative log indent level shift against the parent
+        self._relative_indent = relative_indent
 
         # Store command line context
         if context:
@@ -380,7 +394,7 @@ class Common(object):
         if self.parent is None:
             return -1
         else:
-            return self.parent._level() + 1
+            return self.parent._level() + self._relative_indent
 
     def _indent(
             self,
@@ -510,7 +524,7 @@ class Common(object):
             try:
                 subprocess.run(
                     command, cwd=cwd, shell=shell, env=environment, check=True)
-            except subprocess.CalledProcessError as error:
+            except subprocess.CalledProcessError:
                 # Interactive mode can return non-zero if the last command
                 # failed, ignore errors here
                 pass
@@ -680,6 +694,13 @@ class Common(object):
             self._workdir_cleanup(workdir)
 
         # Create the workdir
+        # Make sure WORKDIR_ROOT has 1777 permission if recreated
+        if workdir.startswith(WORKDIR_ROOT) and not os.path.isdir(WORKDIR_ROOT):
+            try:
+                os.makedirs(WORKDIR_ROOT, exist_ok=True)
+                os.chmod(WORKDIR_ROOT, 0o1777)
+            except OSError as error:
+                raise FileError(f"Failed to prepare workdir '{WORKDIR_ROOT}': {error}")
         create_directory(workdir, 'workdir', quiet=True)
         self._workdir = workdir
 
@@ -993,68 +1014,130 @@ def environment_to_dict(variables: Union[str, List[str]]) -> EnvironmentType:
     return result
 
 
-def environment_file_to_dict(
-        env_files: Iterable[str], root: str = ".") -> Dict[str, str]:
+@lru_cache(maxsize=None)
+def environment_file_to_dict(env_file: str, root: str = ".") -> EnvironmentType:
     """
-    Create dict from files.
+    Read environment variables from the given file.
 
-    Files should be in yaml/yml or dotenv format.
+    File should be in YAML format (``.yaml`` or ``.yml`` suffixes), or in dotenv format.
 
-    dotenv file example:
-        ```bash
-        A=B
-        C=D
-        ```
-    yaml file example:
-        ```yaml
-        A: B
-        C: D
-        ```
+    .. code-block:: bash
+       :caption: dotenv file example
 
-    Path to the file should be relative to the metadata tree root.
+       A=B
+       C=D
+
+    .. code-block:: yaml
+       :caption: YAML file example
+
+       A: B
+       C: D
+
+    Path to each file should be relative to the metadata tree root.
+
+    .. note::
+
+       For loading environment variables from multiple files, see
+       :py:func:`environment_files_to_dict`.
     """
-    result = {}
+
+    env_file = env_file.strip()
+
+    # Fetch a remote file
+    if env_file.startswith("http"):
+        # Create retry session for longer retries, see #1229
+        session = retry_session.create(
+            retries=ENVFILE_RETRY_SESSION_RETRIES,
+            backoff_factor=ENVFILE_RETRY_SESSION_BACKOFF_FACTOR,
+            allowed_methods=('GET',),
+            status_forcelist=(
+                429,  # Too Many Requests
+                500,  # Internal Server Error
+                502,  # Bad Gateway
+                503,  # Service Unavailable
+                504   # Gateway Timeout
+                ),
+            )
+        try:
+            response = session.get(env_file)
+            response.raise_for_status()
+            content = response.text
+        except requests.RequestException as error:
+            raise GeneralError(
+                f"Failed to fetch the environment file from '{env_file}'. "
+                f"The problem was: '{error}'")
+
+    # Read a local file
+    else:
+        # Ensure we don't escape from the metadata tree root
+        try:
+            root_path = Path(root).resolve()
+            full_path = (Path(root_path) / Path(env_file)).resolve()
+            full_path.relative_to(root_path)
+        except ValueError:
+            raise GeneralError(
+                f"The 'environment-file' path '{full_path}' is outside "
+                f"of the metadata tree root '{root}'.")
+        if not Path(full_path).is_file():
+            raise GeneralError(f"File '{full_path}' doesn't exist.")
+
+        content = Path(full_path).read_text()
+
+    # Parse yaml file
+    if os.path.splitext(env_file)[1].lower() in ('.yaml', '.yml'):
+        environment = parse_yaml(content)
+
+    else:
+        try:
+            environment = parse_dotenv(content)
+
+        except ValueError:
+            raise GeneralError(
+                f"Failed to extract variables from environment file "
+                f"'{full_path}'. Ensure it has the proper format "
+                f"(i.e. A=B).")
+
+    if not environment:
+        log.warn(f"Empty environment file '{env_file}'.")
+
+        return {}
+
+    return environment
+
+
+def environment_files_to_dict(env_files: Iterable[str], root: str = ".") -> EnvironmentType:
+    """
+    Read environment variables from the given list of files.
+
+    Files should be in YAML format (``.yaml`` or ``.yml`` suffixes), or in dotenv format.
+
+    .. code-block:: bash
+       :caption: dotenv file example
+
+       A=B
+       C=D
+
+    .. code-block:: yaml
+       :caption: YAML file example
+
+       A: B
+       C: D
+
+    Path to each file should be relative to the metadata tree root.
+
+    .. note::
+
+       For loading environment variables from a single file, see
+       :py:func:`environment_file_to_dict`, which is a function
+       ``environment_files_to_dict()`` calls for each file,
+       accumulating data from all input files.
+    """
+
+    result: EnvironmentType = {}
+
     for env_file in env_files:
-        env_file = str(env_file).strip()
-        # Fetch a remote file
-        if env_file.startswith("http"):
-            try:
-                response = requests.get(env_file)
-                response.raise_for_status()
-                content = response.text
-            except requests.RequestException as error:
-                raise GeneralError(
-                    f"Failed to fetch the environment file from '{env_file}'. "
-                    f"The problem was: '{error}'")
-        # Read a local file
-        else:
-            # Ensure we don't escape from the metadata tree root
-            try:
-                root_path = Path(root).resolve()
-                full_path = (Path(root_path) / Path(env_file)).resolve()
-                full_path.relative_to(root_path)
-            except ValueError:
-                raise GeneralError(
-                    f"The 'environment-file' path '{full_path}' is outside "
-                    f"of the metadata tree root '{root}'.")
-            if not Path(full_path).is_file():
-                raise GeneralError(f"File '{full_path}' doesn't exist.")
-            content = Path(full_path).read_text()
-        # Parse yaml file
-        if re.match(r".*\.ya?ml$", env_file):
-            environment = parse_yaml(content)
-            if not environment:
-                log.warn(f"Empty environment file '{env_file}'.")
-            result.update(environment)
-        # Parse dotenv file
-        else:
-            try:
-                result.update(parse_dotenv(content))
-            except ValueError:
-                raise GeneralError(
-                    f"Failed to extract variables from environment file "
-                    f"'{full_path}'. Ensure it has the proper format "
-                    f"(i.e. A=B).")
+        result.update(environment_file_to_dict(env_file, root=root))
+
     return result
 
 
@@ -1121,6 +1204,8 @@ def yaml_to_dict(data: Any,
     """ Convert yaml into dictionary """
     yaml = YAML(typ=yaml_type)
     loaded_data = yaml.load(data)
+    if loaded_data is None:
+        return dict()
     if not isinstance(loaded_data, dict):
         raise GeneralError(
             f"Expected dictionary in yaml data, "
@@ -1555,30 +1640,118 @@ def public_git_url(url: str) -> str:
     return url
 
 
-def retry_session(
-        retries: int = 3,
-        backoff_factor: float = 0.1,
-        method_whitelist: bool = False,
-        status_forcelist: Tuple[int, ...] = (429, 500, 502, 503, 504)
-        ) -> requests.Session:
+class TimeoutHTTPAdapter(requests.adapters.HTTPAdapter):
     """
-    Create a requests.Session() that retries on request failure.
+    Spice up request's session with custom timeout.
+    """
 
-    'method_whitelist' is set to False to retry on all http request methods
-    by default.
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.timeout = kwargs.pop('timeout', None)
+
+        super().__init__(*args, **kwargs)
+
+    def send(  # type: ignore # does not match superclass type on purpose
+            self,
+            request: requests.PreparedRequest,
+            **kwargs: Any) -> requests.Response:
+        kwargs.setdefault('timeout', self.timeout)
+
+        return super().send(request, **kwargs)
+
+
+class RetryStrategy(requests.packages.urllib3.util.retry.Retry):  # type: ignore[misc]
+    def increment(
+            self,
+            *args: Any,
+            **kwargs: Any
+            ) -> requests.packages.urllib3.util.retry.Retry:
+        error = cast(Optional[Exception], kwargs.get('error', None))
+
+        # Detect a subset of exception we do not want to follow with a retry.
+        if error is not None:
+            # Failed certificate verification - this issue will probably not get any better
+            # should we try again.
+            if isinstance(error, urllib3.exceptions.SSLError) \
+                    and 'certificate verify failed' in str(error):
+
+                # [mpr] I'm not sure how stable this *iternal* API is, but pool seems to be the
+                # only place aware of the remote hostname. Try our best to get the hostname for
+                # a better error message, but don't crash because of a missing attribute or
+                # something as dumb.
+
+                connection_pool = kwargs.get('_pool', None)
+
+                if connection_pool is not None and hasattr(connection_pool, 'host'):
+                    message = f"Certificate verify failed for '{connection_pool.host}'."
+                else:
+                    message = 'Certificate verify failed.'
+
+                raise GeneralError(message, original=error) from error
+
+        return super().increment(*args, **kwargs)
+
+
+class retry_session(contextlib.AbstractContextManager):  # type: ignore
     """
-    session = requests.Session()
-    retry = Retry(
-        total=retries,
-        backoff_factor=backoff_factor,
-        status_forcelist=status_forcelist,
-        method_whitelist=method_whitelist,
-        raise_on_status=False,
-        )
-    adapter = HTTPAdapter(max_retries=retry)
-    session.mount('http://', adapter)
-    session.mount('https://', adapter)
-    return session
+    Context manager for requests.Session() with retries and timeout
+    """
+    @staticmethod
+    def create(
+            retries: int = DEFAULT_RETRY_SESSION_RETRIES,
+            backoff_factor: float = DEFAULT_RETRY_SESSION_BACKOFF_FACTOR,
+            allowed_methods: Optional[Tuple[str, ...]] = None,
+            status_forcelist: Optional[Tuple[int, ...]] = None,
+            timeout: Optional[int] = None
+            ) -> requests.Session:
+        retry_strategy = RetryStrategy(
+            total=retries,
+            status_forcelist=status_forcelist,
+            # `method_whitelist`` has been renamed to `allowed_methods` since
+            # urllib3 1.26, and it will be removed in urllib3 2.0.
+            # `allowed_methods` is therefore the future-proof name, but for the
+            # sake of backward compatibility, internally we need to use the
+            # deprecated parameter for now. Or request newer urllib3, but that
+            # might a problem because of RPM availability.
+            method_whitelist=allowed_methods,
+            backoff_factor=backoff_factor)
+
+        if timeout is not None:
+            http_adapter: requests.adapters.HTTPAdapter = TimeoutHTTPAdapter(
+                timeout=timeout, max_retries=retry_strategy)
+        else:
+            http_adapter = requests.adapters.HTTPAdapter(
+                max_retries=retry_strategy)
+
+        session = requests.Session()
+        session.mount('http://', http_adapter)
+        session.mount('https://', http_adapter)
+
+        return session
+
+    def __init__(
+            self,
+            retries: int = DEFAULT_RETRY_SESSION_RETRIES,
+            backoff_factor: float = DEFAULT_RETRY_SESSION_BACKOFF_FACTOR,
+            allowed_methods: Optional[Tuple[str, ...]] = None,
+            status_forcelist: Optional[Tuple[int, ...]] = None,
+            timeout: Optional[int] = None
+            ) -> None:
+        self.retries = retries
+        self.backoff_factor = backoff_factor
+        self.allowed_methods = allowed_methods
+        self.status_forcelist = status_forcelist
+        self.timeout = timeout
+
+    def __enter__(self) -> requests.Session:
+        return self.create(
+            retries=self.retries,
+            backoff_factor=self.backoff_factor,
+            allowed_methods=self.allowed_methods,
+            status_forcelist=self.status_forcelist,
+            timeout=self.timeout)
+
+    def __exit__(self, *args: Any) -> None:
+        pass
 
 
 def remove_color(text: str) -> str:
@@ -1617,30 +1790,79 @@ def parse_yaml(content: str) -> EnvironmentType:
     return {key: str(value) for key, value in yaml_as_dict.items()}
 
 
-def validate_fmf_id(fmf_id: 'tmt.base.FmfIdType') -> Tuple[bool, str]:
+def validate_git_status(test: 'tmt.base.Test') -> Tuple[bool, str]:
     """
-    Validate given fmf id and return a human readable error
+    Validate that test has current metadata on fmf_id
 
     Return a tuple (boolean, message) as the result of validation.
-    The boolean specifies the validation result and the message
-    the validation error. In case the FMF id is valid, return an empty
-    string as the message.
+
+    Checks that sources:
+    - all local changes are committed
+    - up to date on remote repository
+    - .fmf/version marking fmf root is committed as well
+
+    When all checks pass returns (True, '').
     """
-    # Validate remote id and translate to human readable errors
+    sources = test.node.sources + \
+        [os.path.join(test.node.root, '.fmf', 'version')]
+
+    # Use tmt's run instead of subprocess.run
+    run = Common().run
+
+    # Check for not committed metadata changes
+    cmd = ['git', 'status', '--porcelain', '--'] + sources
     try:
-        fmf.base.Tree.node(fmf_id)
-    except fmf.utils.GeneralError as error:
-        # Map fmf errors to more user friendly alternatives
-        error_map = [
-            ('git clone', f"repo '{fmf_id.get('url')}' cannot be cloned"),
-            ('git checkout', f"git ref '{fmf_id.get('ref')}' is invalid"),
-            ('directory path', f"path '{fmf_id.get('path')}' is invalid"),
-            ('tree root',
-             f"No tree found in repo '{fmf_id.get('url')}', "
-             f"missing an '.fmf' directory?")
-            ]
-        errors = [err[1] for err in error_map if err[0] in str(error)]
-        return (False, errors[0] if errors else str(error))
+        result = run(cmd, cwd=test.node.root, join=True)
+    except RunError as error:
+        return (
+            False,
+            f"Failed to run git status: {error.stdout}"
+            )
+
+    not_committed = []
+    assert result.stdout is not None
+    for line in result.stdout.split('\n'):
+        if line:
+            # XY PATH or XY ORIG -> PATH. XY and PATH are separated by space
+            not_committed.append(line[3:])
+
+    if not_committed:
+        return (False, "Uncommitted changes in " + " ".join(not_committed))
+
+    # Check for not pushed changes
+    cmd = ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]
+    try:
+        result = run(cmd, cwd=test.node.root)
+    except RunError as error:
+        return (
+            False,
+            f'Failed to get remote branch, error raised: "{error.stderr}"'
+            )
+
+    assert result.stdout is not None
+    remote_ref = result.stdout.strip()
+
+    cmd = [
+        'git',
+        'diff',
+        f'HEAD..{remote_ref}',
+        '--name-status',
+        '--'] + sources
+    try:
+        result = run(cmd, cwd=test.node.root)
+    except RunError as error:
+        return (
+            False,
+            f'Failed to diff against remote branch, error raised: "{error.stderr}"')
+
+    not_pushed = []
+    assert result.stdout is not None
+    for line in result.stdout.split('\n'):
+        if line:
+            _, path = line.strip().split('\t', maxsplit=2)
+            not_pushed.append(path)
+    if not_pushed:
+        return (False, "Not pushed changes in " + " ".join(not_pushed))
 
     return (True, '')
 

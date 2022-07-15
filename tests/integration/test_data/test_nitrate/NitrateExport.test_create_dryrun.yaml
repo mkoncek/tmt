@@ -15,10 +15,9 @@ tmt.utils:
       - click.decorators
       - tmt.cli
       - tmt.base
-      - pysnooper.tracer
       - tmt.export
       - requre.objects
       - requre.cassette
       - tmt.utils
       - check_git_url
-    output: https://github.com/psss/tmt.git
+    output: https://github.com/teemtee/tmt.git

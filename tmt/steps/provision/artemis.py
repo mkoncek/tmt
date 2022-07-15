@@ -7,7 +7,8 @@ import click
 import requests
 
 import tmt
-from tmt.utils import ProvisionError, updatable_message
+import tmt.steps.provision
+from tmt.utils import ProvisionError, retry_session, updatable_message
 
 if sys.version_info >= (3, 8):
     from typing import TypedDict
@@ -20,12 +21,20 @@ else:
 # know when particular feature became available, and avoid using it with
 # older APIs.
 SUPPORTED_API_VERSIONS = (
-    '0.0.28', '0.0.32'
+    # NEW: added hostname HW constraint
+    '0.0.38',
+    # NEW: virtualization HW constraint
+    '0.0.37',
+    # NEW: boot.method HW constraint
+    '0.0.32',
+    # NEW: network HW constraint
+    '0.0.28'
     )
+
 
 # The default Artemis API version - the most recent supported versions
 # should be perfectly fine.
-DEFAULT_API_VERSION = SUPPORTED_API_VERSIONS[-1]
+DEFAULT_API_VERSION = SUPPORTED_API_VERSIONS[0]
 
 # Type annotation for "data" package describing a guest instance. Passed
 # between load() and save() calls.
@@ -108,71 +117,22 @@ GuestInspectType = TypedDict(
     )
 
 
-class TimeoutHTTPAdapter(requests.adapters.HTTPAdapter):
-    """
-    Spice up request's session with custom timeout.
-    """
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self.timeout = kwargs.pop('timeout', DEFAULT_API_TIMEOUT)
-
-        super().__init__(*args, **kwargs)
-
-    def send(  # type: ignore # does not match superclass type on purpose
-            self,
-            request: requests.PreparedRequest,
-            **kwargs: Any) -> requests.Response:
-        kwargs.setdefault('timeout', self.timeout)
-
-        return super().send(request, **kwargs)
-
-
 class ArtemisAPI:
-    def install_http_retries(
-            self,
-            timeout: int,
-            retries: int,
-            retry_backoff_factor: int
-            ) -> None:
-        """
-        Install custom "retry strategy" and timeout to our HTTP session.
+    def __init__(self, guest: 'GuestArtemis') -> None:
+        self._guest = guest
 
-        Strategy and timeout work together, "consuming" the timeout as
-        specified by the strategy.
-        """
-
-        retry_strategy = requests.packages.urllib3.util.retry.Retry(  # type: ignore[attr-defined]
-            total=retries,
-            status_forcelist=[
+        self.http_session = retry_session.create(
+            retries=guest.api_retries,
+            backoff_factor=guest.api_retry_backoff_factor,
+            allowed_methods=('HEAD', 'GET', 'POST', 'DELETE', 'PUT'),
+            status_forcelist=(
                 429,  # Too Many Requests
                 500,  # Internal Server Error
                 502,  # Bad Gateway
                 503,  # Service Unavailable
                 504   # Gateway Timeout
-                ],
-            method_whitelist=[
-                'HEAD', 'GET', 'POST', 'DELETE', 'PUT'
-                ],
-            backoff_factor=retry_backoff_factor
-            )
-
-        timeout_adapter = TimeoutHTTPAdapter(
-            timeout=timeout,
-            max_retries=retry_strategy
-            )
-
-        self.http_session.mount('https://', timeout_adapter)
-        self.http_session.mount('http://', timeout_adapter)
-
-    def __init__(self, guest: 'GuestArtemis') -> None:
-        self._guest = guest
-
-        self.http_session = requests.Session()
-
-        self.install_http_retries(
-            timeout=guest.api_timeout,
-            retries=guest.api_retries,
-            retry_backoff_factor=guest.api_retry_backoff_factor
+                ),
+            timeout=guest.api_timeout
             )
 
     def query(
@@ -348,7 +308,7 @@ class ProvisionArtemis(
     @classmethod
     def options(cls, how: Any = None) -> List[click.Option]:
         """ Prepare command line options for Artemis """
-        return [
+        return cast(List[click.Option], [
             click.option(
                 '--api-url', metavar='URL',
                 help="Artemis API URL.",
@@ -412,7 +372,7 @@ class ProvisionArtemis(
                 help=f'A factor for exponential API retry backoff, '
                      f'{DEFAULT_RETRY_BACKOFF_FACTOR} by default.',
                 ),
-            ] + cast(List[click.Option], super().options(how))
+            ]) + cast(List[click.Option], super().options(how))
 
     def default(self, option: str, default: Optional[Any] = None) -> Any:
         """ Return default data for given option """
@@ -447,7 +407,7 @@ class ProvisionArtemis(
                     )
                 }
 
-        except ValueError as exc:
+        except ValueError:
             raise ProvisionError('Cannot parse user-data.')
 
         data: StepStateType = {
@@ -604,7 +564,7 @@ class GuestArtemis(tmt.GuestSsh):  # type: ignore[misc]
 
                 if state == 'error':
                     raise ProvisionError(
-                        f'Failed to create, provisioning failed.')
+                        'Failed to create, provisioning failed.')
 
                 if state == 'ready':
                     break

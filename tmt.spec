@@ -1,5 +1,5 @@
 Name: tmt
-Version: 1.14.0
+Version: 1.15.0
 Release: 1%{?dist}
 
 Summary: Test Management Tool
@@ -14,6 +14,8 @@ ExcludeArch: %{power64}
 
 URL: https://github.com/teemtee/tmt
 Source0: https://github.com/teemtee/tmt/releases/download/%{version}/tmt-%{version}.tar.gz
+
+%define workdir_root /var/tmp/tmt
 
 # Main tmt package requires the Python module
 Requires: python%{python3_pkgversion}-%{name} == %{version}-%{release}
@@ -36,7 +38,7 @@ BuildRequires: python%{python3_pkgversion}-pytest
 BuildRequires: python%{python3_pkgversion}-click
 BuildRequires: python%{python3_pkgversion}-fmf >= 1.1.0
 BuildRequires: python%{python3_pkgversion}-requests
-BuildRequires: python%{python3_pkgversion}-testcloud
+BuildRequires: python%{python3_pkgversion}-testcloud >= 0.8.1
 BuildRequires: python%{python3_pkgversion}-markdown
 BuildRequires: python%{python3_pkgversion}-junit_xml
 BuildRequires: python%{python3_pkgversion}-ruamel-yaml
@@ -68,7 +70,7 @@ Dependencies required to run tests in a container environment.
 Summary: Virtual machine provisioner for the Test Management Tool
 Obsoletes: tmt-testcloud < 0.17
 Requires: tmt == %{version}-%{release}
-Requires: python%{python3_pkgversion}-testcloud >= 0.7.0
+Requires: python%{python3_pkgversion}-testcloud >= 0.8.1
 Requires: openssh-clients
 Requires: (ansible or ansible-core)
 # Recommend qemu system emulators for supported arches
@@ -137,7 +139,8 @@ mkdir -p %{buildroot}%{_mandir}/man1
 mkdir -p %{buildroot}/etc/bash_completion.d/
 install -pm 644 tmt.1* %{buildroot}%{_mandir}/man1
 install -pm 644 bin/complete %{buildroot}/etc/bash_completion.d/tmt
-
+mkdir -p %{buildroot}%{workdir_root}
+chmod 1777 %{buildroot}%{workdir_root}
 
 %check
 %{__python3} -m pytest -vv -m 'not web' --ignore=tests/integration
@@ -157,8 +160,9 @@ install -pm 644 bin/complete %{buildroot}/etc/bash_completion.d/tmt
 %{python3_sitelib}/%{name}/
 %{python3_sitelib}/%{name}-*.egg-info/
 %license LICENSE
+%dir %{workdir_root}
 %exclude %{python3_sitelib}/%{name}/steps/provision/{,__pycache__/}{podman,testcloud}.*
-%exclude %{python3_sitelib}/%{name}/steps/report/{,__pycache__/}html.*
+%exclude %{python3_sitelib}/%{name}/steps/report/{,__pycache__/}html*
 %exclude %{python3_sitelib}/%{name}/steps/report/{,__pycache__/}junit.*
 
 %files provision-container
@@ -168,7 +172,8 @@ install -pm 644 bin/complete %{buildroot}/etc/bash_completion.d/tmt
 %{python3_sitelib}/%{name}/steps/provision/{,__pycache__/}testcloud.*
 
 %files report-html
-%{python3_sitelib}/%{name}/steps/report/{,__pycache__/}html.*
+%{python3_sitelib}/%{name}/steps/report/{,__pycache__/}html*
+
 
 %files report-junit
 %{python3_sitelib}/%{name}/steps/report/{,__pycache__/}junit.*
@@ -181,6 +186,59 @@ install -pm 644 bin/complete %{buildroot}/etc/bash_completion.d/tmt
 
 
 %changelog
+* Sat Jul 02 2022 Lukáš Zachar <lzachar@redhat.com> - 1.15.0-1
+- Require fresh testcloud with coreos support
+- Bad substitution in tmt-reboot
+- Ignore "certificate verify failed" error when handling retries
+- Cache content of each loaded environment file
+- Initial polarion support for test export
+- Fixes names of Artemis API versions
+- Convert FmfIdType from TypedDict to a dataclass
+- Add CoreOS support to the testcloud provision
+- Run containers with root user
+- Retry getting environment file
+- Test import --general is default now
+- Add typing for steps/finish/shell.py
+- Enhance tmt.utils.retry_session with timeout support
+- Adjust the `rpm-ostree` install implementation
+- Add support for the `rpm-ostree` package manager
+- Add `environment-file` to possible Plan keys
+- Avoid Library url conflict if repo doesn't exist
+- Check changes are pushed before export nitrate
+- Add typing for beakerlib.py
+- Unbundle template from the report.html plugin
+- Rename `uuid` to `identifier` to prevent conflicts
+- Use `must` for all mandatory spec requirements
+- Fail import for packages starting with minus sign
+- Adds support for newer Artemis API versions
+- Disable the extra verbose progress in testcloud
+- Refactor internal executor scripts
+- Adds "missing" imports to help IDEs follow objects
+- Add typing for steps/__init__.py
+- Implement the test `result` attribute
+- Add typing for plugins/__init__.py
+- Detect legacy relevancy during import as well
+- Implement the new user story key `priority`
+- Implement new class `SerializableContainer`
+- Add schema for stories
+- Add typing for steps/prepare/shell.py
+- Add typing for steps/prepare/ansible.py
+- Require fmf >= 1.1.0 (we need validation support)
+- Package fmf root into the source tarball as well
+- Add JSON Schema for tests
+- Exclude namespaced backup in beakerlib
+- Use --depth=1 when cloning git repos by default
+- Handle missing nitrate user during export
+- Removes unused GuestContainer.container_id attribute
+- Every subpackage must require the main tmt package
+- Introduce dataclasses as a requirement
+- Avoid re-using image/instance for different values by testcloud plugin
+- Add typing for multihost.py
+- Except nitrate xmlrpc issues during import
+- Exclude beakerlib's backup dir from guest.pull()
+- Increase `duration` for the reboot-related tests
+- Several release-related tests and docs adjustments
+
 * Mon Jun 06 2022 Petr Šplíchal <psplicha@redhat.com> - 1.14.0-1
 - Command 'tmt clean' should not run rsync at all
 - Dist-git-source for Discover (fmf, shell)

@@ -16,7 +16,11 @@ with open('tmt.spec', encoding='utf-8') as specfile:
 __version__ = version
 __pkg__ = 'tmt'
 __pkgdata__ = {
-    'tmt': ['schemas/*.yaml']
+    'tmt': [
+        'schemas/*.yaml',
+        'steps/execute/scripts/*',
+        'steps/report/html/*'
+        ]
 }
 __pkgdir__ = {}
 __pkgs__ = [
@@ -57,13 +61,14 @@ extras_require = {
         'sphinx>=3',
         'sphinx_rtd_theme'],
     'tests': [
+        'flake8',
         'pytest',
         'python-coveralls',
         'requre',
         'pre-commit',
         'mypy'
         ],
-    'provision': ['testcloud>=0.7.0'],
+    'provision': ['testcloud>=0.8.1'],
     'convert': [
         'nitrate',
         'markdown',
@@ -71,7 +76,8 @@ extras_require = {
         'html2text'],
     'report-html': ['jinja2'],
     'report-junit': ['junit_xml'],
-    }
+    'export-polarion': ['pylero'],
+}
 extras_require['all'] = [
     dependency
     for extra in extras_require.values()
