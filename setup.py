@@ -56,6 +56,9 @@ if sys.version_info.minor <= 7:
 if sys.version_info.minor <= 6:
     install_requires.append('dataclasses')
 
+# entry_points is part of Python 3.9+
+install_requires.append("importlib_metadata; python_version < '3.9'")
+
 extras_require = {
     'docs': [
         'sphinx>=3',
