@@ -168,8 +168,8 @@ def write_markdown(path: str, content: Dict[str, str]) -> None:
         raise ConvertError(f"Unable to write '{path}'.")
 
 
-def add_link(target: int, data: NitrateDataType,
-            system: int = SYSTEM_BUGZILLA, type_: str = 'relates') -> None:
+def add_link(target: str, data: NitrateDataType,
+             system: int = SYSTEM_BUGZILLA, type_: str = 'relates') -> None:
     """ Add relevant link into data under the 'link' key """
     new_link = dict()
     if system == SYSTEM_BUGZILLA:
@@ -291,7 +291,7 @@ def read_datafile(
             echo(style('environment:', fg='green'))
             echo(pprint.pformat(data['environment']))
 
-    def sanitize_name(name):
+    def sanitize_name(name: str) -> str:
         """ Raise if package name starts with '-' (negative require) """
         if name.startswith('-'):
             # Beaker supports excluding packages but tmt does not
