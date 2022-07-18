@@ -3,13 +3,14 @@ import os
 import re
 import shutil
 import subprocess
-from typing import Any, List, Optional, cast
+from typing import List, Optional, cast
 
 import click
 import fmf
 
 import tmt
 import tmt.beakerlib
+import tmt.options
 import tmt.steps.discover
 from tmt.base import Test
 
@@ -120,9 +121,9 @@ class DiscoverFmf(tmt.steps.discover.DiscoverPlugin):  # type: ignore[misc]
         )
 
     @classmethod
-    def options(cls, how: Optional[str] = None) -> Any:
+    def options(cls, how: Optional[str] = None) -> List[tmt.options.ClickOptionDecoratorType]:
         """ Prepare command line options for given method """
-        return [
+        return cast(List[tmt.options.ClickOptionDecoratorType], [
             click.option(
                 '-u', '--url', metavar='REPOSITORY',
                 help='URL of the git repository with fmf metadata.'),
@@ -180,7 +181,7 @@ class DiscoverFmf(tmt.steps.discover.DiscoverPlugin):  # type: ignore[misc]
                      'supported. Defaults to the top fmf root if it is '
                      'present, otherwise top directory (shortcut "/").'
                 ),
-            ] + super().options(how)
+            ]) + cast(List[tmt.options.ClickOptionDecoratorType], super().options(how))
 
     def wake(self, keys: Optional[List[str]] = None) -> None:
         """ Wake up the plugin, process data, apply options """
@@ -197,13 +198,13 @@ class DiscoverFmf(tmt.steps.discover.DiscoverPlugin):  # type: ignore[misc]
         super().wake(keys=keys)
 
     @property
-    def is_in_standalone_mode(self) -> Any:
+    def is_in_standalone_mode(self) -> bool:
         """ Enable standalone mode when listing fmf ids """
         if self.opt('fmf_id'):
             return True
-        return super().is_in_standalone_mode
+        return cast(bool, super().is_in_standalone_mode)
 
-    def go(self) -> Any:
+    def go(self) -> None:
         """ Discover available tests """
         super(DiscoverFmf, self).go()
 
@@ -226,10 +227,10 @@ class DiscoverFmf(tmt.steps.discover.DiscoverPlugin):  # type: ignore[misc]
                 "Cannot manipulate with dist-git without "
                 "the `--dist-git-merge` option.")
 
-        def get_git_root(dir: str) -> Any:
-            return self.run(
+        def get_git_root(dir: str) -> str:
+            return cast(str, self.run(
                 ["git", "rev-parse", "--show-toplevel"],
-                cwd=dir, dry=True)[0].strip('\n')
+                cwd=dir, dry=True)[0]).strip('\n')
 
         # Raise an exception if --fmf-id uses w/o url and git root
         # doesn't exist for discovered plan
