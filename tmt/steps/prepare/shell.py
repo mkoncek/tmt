@@ -12,7 +12,7 @@ from tmt.steps.provision import Guest
 # TODO: drop ignore once type annotations between modules enabled
 class PrepareShell(tmt.steps.prepare.PreparePlugin):  # type: ignore[misc]
     """
-    Prepare guest using shell scripts
+    Prepare guest using shell (bash) scripts
 
     Example config:
 

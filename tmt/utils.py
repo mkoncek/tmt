@@ -519,11 +519,17 @@ class Common(object):
             environment = None
         self.debug('environment', pprint.pformat(environment), level=4)
 
+        executable = None
+        # Set only for shell=True as it would affect command
+        if shell:
+            executable = '/bin/bash'
+
         # Run the command in interactive mode if requested
         if interactive:
             try:
                 subprocess.run(
-                    command, cwd=cwd, shell=shell, env=environment, check=True)
+                    command, cwd=cwd, shell=shell, env=environment, check=True,
+                    executable=executable)
             except subprocess.CalledProcessError:
                 # Interactive mode can return non-zero if the last command
                 # failed, ignore errors here
@@ -536,7 +542,8 @@ class Common(object):
             process = subprocess.Popen(
                 command, cwd=cwd, shell=shell, env=environment,
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT if join else subprocess.PIPE)
+                stderr=subprocess.STDOUT if join else subprocess.PIPE,
+                executable=executable)
         except FileNotFoundError as error:
             raise RunError(
                 f"File '{error.filename}' not found.", command, 127)

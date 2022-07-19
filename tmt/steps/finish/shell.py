@@ -10,7 +10,7 @@ from tmt.steps.provision import Guest
 
 class FinishShell(tmt.steps.finish.FinishPlugin):  # type: ignore[misc]
     """
-    Perform finishing tasks using shell scripts
+    Perform finishing tasks using shell (bash) scripts
 
     Example config:
 
