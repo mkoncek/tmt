@@ -15,6 +15,7 @@ import tmt.steps.discover
 from tmt.base import Test
 
 
+# TODO: get rid of `ignore` once superclass is no longer `Any`
 class DiscoverFmf(tmt.steps.discover.DiscoverPlugin):  # type: ignore[misc]
     """
     Discover available tests from fmf metadata
