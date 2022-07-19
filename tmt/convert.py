@@ -15,7 +15,7 @@ from click import echo, style
 
 import tmt.export
 import tmt.utils
-from tmt.utils import ConvertError
+from tmt.utils import ConvertError, GeneralError
 
 log = fmf.utils.Logging('tmt').logger
 
@@ -413,7 +413,8 @@ def read(
             restraint_file = True
             echo(style('Restraint ', fg='blue'), nl=False)
 
-    assert filename is not None
+    if filename is None:
+        raise GeneralError('filename is not defined')
     # Open the datafile
     if restraint_file or makefile_file:
         datafile_path = os.path.join(path, filename)
@@ -682,9 +683,12 @@ def read_nitrate(
     return common_data, individual_data
 
 
+RelevancyType = Union[str, List[str]]
+
+
 def extract_relevancy(
         notes: str,
-        field: tmt.utils.StructuredField) -> Optional[Union[str, List[str]]]:
+        field: tmt.utils.StructuredField) -> Optional[RelevancyType]:
     """ Get relevancy from testcase, respecting sf priority """
     try:
         if "relevancy" in field:
@@ -725,7 +729,7 @@ def read_nitrate_case(
             data['contact'] = '{} <{}>'.format(
                 testcase.tester.name, testcase.tester.email)
         else:
-            if makefile_data is None:
+            if makefile_data is None or 'contact' not in makefile_data:
                 # Otherwise use just the email address
                 data['contact'] = testcase.tester.email
             # Use contact from Makefile if it's there and email matches
@@ -806,7 +810,7 @@ def read_nitrate_case(
 
     # Extend bugs detected from Makefile with those linked in Nitrate
     try:
-        if makefile_data is not None:
+        if makefile_data is not None and 'link' in makefile_data:
             data['link'] = makefile_data['link'].copy()
     except (KeyError, TypeError):
         pass
@@ -903,7 +907,7 @@ def write(path: str, data: NitrateDataType) -> None:
 
 
 def relevancy_to_adjust(
-        relevancy: Union[str, List[str]]) -> List[NitrateDataType]:
+        relevancy: RelevancyType) -> List[NitrateDataType]:
     """
     Convert the old test case relevancy into adjust rules
 
