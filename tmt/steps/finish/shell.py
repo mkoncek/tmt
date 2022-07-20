@@ -1,4 +1,4 @@
-from typing import Any, List, Optional
+from typing import Any, List, Optional, cast
 
 import click
 import fmf
@@ -33,11 +33,11 @@ class FinishShell(tmt.steps.finish.FinishPlugin):
     @classmethod
     def options(cls, how: Optional[str] = None) -> Any:
         """ Finish command line options """
-        return [
+        return cast(List[tmt.options.ClickOptionDecoratorType], [
             click.option(
                 '-s', '--script', metavar='SCRIPT',
                 help='Shell script to be executed.')
-            ] + super().options(how)
+            ]) + super().options(how)
 
     def default(self, option: str, default: Optional[Any] = None) -> Any:
         """ Return default data for given option """

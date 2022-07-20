@@ -5,10 +5,10 @@ import click
 import fmf
 
 import tmt
-from tmt.steps import Method, Step, StepData
+from tmt.steps import Method, StepData
 
 
-class Finish(Step):
+class Finish(tmt.steps.Step):
     """
     Perform the finishing tasks and clean up provisioned guests.
 
