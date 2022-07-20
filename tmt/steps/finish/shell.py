@@ -8,7 +8,7 @@ import tmt.steps.finish
 from tmt.steps.provision import Guest
 
 
-class FinishShell(tmt.steps.finish.FinishPlugin):  # type: ignore[misc]
+class FinishShell(tmt.steps.finish.FinishPlugin):
     """
     Perform finishing tasks using shell scripts
 

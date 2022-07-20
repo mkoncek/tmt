@@ -1,11 +1,11 @@
 import copy
-from typing import Optional, Type
+from typing import Any, List, Optional, Type
 
 import click
 import fmf
 
 import tmt
-from tmt.steps import Step
+from tmt.steps import Method, Step, StepData
 
 
 class Finish(Step):
@@ -20,6 +20,7 @@ class Finish(Step):
     steps failed (for example when the environment preparation was not
     successful) so that provisioned systems are not kept running.
     """
+    data: List[StepData]
 
     def wake(self) -> None:
         """ Wake up the step (process workdir and command line) """
@@ -105,7 +106,7 @@ class FinishPlugin(tmt.steps.Plugin):
     """ Common parent of finish plugins """
 
     # List of all supported methods aggregated from all plugins
-    _supported_methods = []
+    _supported_methods: List[Method] = []
 
     @classmethod
     def base_command(
@@ -124,7 +125,7 @@ class FinishPlugin(tmt.steps.Plugin):
         @click.option(
             '-h', '--how', metavar='METHOD',
             help='Use specified method for finishing tasks.')
-        def finish(context, **kwargs):
+        def finish(context: click.Context, **kwargs: Any) -> None:
             context.obj.steps.add('finish')
             Finish._save_context(context)
 
